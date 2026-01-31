@@ -56,6 +56,7 @@ import io
 import json
 import logging
 import math
+import os  # noqa: E402
 import re
 import shutil
 import signal
@@ -65,8 +66,6 @@ import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional, Protocol, Sequence, Tuple
-
-import os  # noqa: E402
 
 # -----------------------------------------------------------------------------
 # Environment setup
@@ -133,7 +132,7 @@ def _suppress_output():
     try:
         os.dup2(devnull, 2)
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
-            io.StringIO()
+                io.StringIO()
         ):
             yield
     finally:
@@ -153,22 +152,22 @@ class TokenizerLike(Protocol):
     def decode(self, token_ids: Sequence[int]) -> str: ...
 
     def apply_chat_template(
-        self,
-        messages: Sequence[Dict[str, str]],
-        tokenize: bool,
-        add_generation_prompt: bool,
+            self,
+            messages: Sequence[Dict[str, str]],
+            tokenize: bool,
+            add_generation_prompt: bool,
     ) -> str: ...
 
 
 class FeatureExtractorLike(Protocol):
     def __call__(
-        self,
-        audio: np.ndarray,
-        sampling_rate: int,
-        return_attention_mask: bool,
-        truncation: bool,
-        padding: bool,
-        return_tensors: str,
+            self,
+            audio: np.ndarray,
+            sampling_rate: int,
+            return_attention_mask: bool,
+            truncation: bool,
+            padding: bool,
+            return_tensors: str,
     ) -> Dict[str, Any]: ...
 
 
@@ -260,9 +259,9 @@ def _get_feat_extract_output_lengths(input_lengths: mx.array) -> mx.array:
     input_lengths_leave = input_lengths % 100
     feat_lengths = _floor_div(input_lengths_leave - 1, 2) + 1
     output_lengths = (
-        _floor_div(_floor_div(feat_lengths - 1, 2) + 1 - 1, 2)
-        + 1
-        + (input_lengths // 100) * 13
+            _floor_div(_floor_div(feat_lengths - 1, 2) + 1 - 1, 2)
+            + 1
+            + (input_lengths // 100) * 13
     )
     return output_lengths
 
@@ -294,7 +293,7 @@ class AudioAttention(nn.Module):
         self.embed_dim = config.d_model
         self.num_heads = config.encoder_attention_heads
         self.head_dim = self.embed_dim // self.num_heads
-        self.scaling = self.head_dim**-0.5
+        self.scaling = self.head_dim ** -0.5
 
         self.q_proj = nn.Linear(self.embed_dim, self.embed_dim, bias=True)
         self.k_proj = nn.Linear(self.embed_dim, self.embed_dim, bias=True)
@@ -302,7 +301,7 @@ class AudioAttention(nn.Module):
         self.out_proj = nn.Linear(self.embed_dim, self.embed_dim, bias=True)
 
     def __call__(
-        self, hidden_states: mx.array, mask: Optional[mx.array] = None
+            self, hidden_states: mx.array, mask: Optional[mx.array] = None
     ) -> mx.array:
         bsz, seq_len, _ = hidden_states.shape
         queries = self.q_proj(hidden_states) * self.scaling
@@ -341,7 +340,7 @@ class AudioEncoderLayer(nn.Module):
         self.final_layer_norm = nn.LayerNorm(self.embed_dim)
 
     def __call__(
-        self, hidden_states: mx.array, mask: Optional[mx.array] = None
+            self, hidden_states: mx.array, mask: Optional[mx.array] = None
     ) -> mx.array:
         residual = hidden_states
         hidden_states = self.self_attn_layer_norm(hidden_states)
@@ -398,7 +397,7 @@ class AudioEncoder(nn.Module):
         self.proj2 = nn.Linear(embed_dim, config.output_dim)
 
     def _create_block_attention_mask(
-        self, seq_len: int, cu_seqlens: List[int], dtype: mx.Dtype
+            self, seq_len: int, cu_seqlens: List[int], dtype: mx.Dtype
     ) -> mx.array:
         """Limit attention to chunk boundaries for stability and speed."""
         mask = mx.full((seq_len, seq_len), -1e9, dtype=dtype)
@@ -408,7 +407,7 @@ class AudioEncoder(nn.Module):
         return mask
 
     def _compute_chunk_layout(
-        self, feature_lens: np.ndarray, chunk_size: int
+            self, feature_lens: np.ndarray, chunk_size: int
     ) -> Tuple[np.ndarray, np.ndarray]:
         """Define chunking so long inputs stay bounded in memory/latency."""
         chunk_counts = np.ceil(feature_lens / chunk_size).astype(np.int32)
@@ -425,16 +424,16 @@ class AudioEncoder(nn.Module):
         return chunk_counts, np.array(chunk_lengths, dtype=np.int32)
 
     def _slice_feature_chunks(
-        self,
-        input_features: mx.array,
-        feature_lens: np.ndarray,
-        chunk_counts: np.ndarray,
-        chunk_size: int,
+            self,
+            input_features: mx.array,
+            feature_lens: np.ndarray,
+            chunk_counts: np.ndarray,
+            chunk_size: int,
     ) -> List[mx.array]:
         """Cut features into chunks so conv/attention operate on windows."""
         chunks: List[mx.array] = []
         for feat, feat_len, num_chunks in zip(
-            input_features, feature_lens, chunk_counts
+                input_features, feature_lens, chunk_counts
         ):
             feat_len = int(feat_len)
             num_chunks = int(num_chunks)
@@ -444,12 +443,12 @@ class AudioEncoder(nn.Module):
                 clen = (
                     chunk_size if (j < num_chunks - 1 or remainder == 0) else remainder
                 )
-                chunks.append(feat[:, pos : pos + clen])
+                chunks.append(feat[:, pos: pos + clen])
                 pos += clen
         return chunks
 
     def _pad_chunks(
-        self, chunks: List[mx.array], chunk_lengths: np.ndarray
+            self, chunks: List[mx.array], chunk_lengths: np.ndarray
     ) -> Tuple[mx.array, int]:
         """Pad for batching so convs run as a single dense tensor."""
         max_chunk_len = int(chunk_lengths.max())
@@ -462,7 +461,7 @@ class AudioEncoder(nn.Module):
         return mx.stack(padded_chunks, axis=0), max_chunk_len
 
     def _build_cu_seqlens(
-        self, aftercnn_lens: np.ndarray, window_aftercnn: int
+            self, aftercnn_lens: np.ndarray, window_aftercnn: int
     ) -> List[int]:
         """Provide segment boundaries so attention stays inside windows."""
         cu_chunk_lens = [0]
@@ -477,9 +476,9 @@ class AudioEncoder(nn.Module):
         return np.cumsum(cu_chunk_lens).tolist()
 
     def __call__(
-        self,
-        input_features: mx.array,
-        feature_attention_mask: Optional[mx.array] = None,
+            self,
+            input_features: mx.array,
+            feature_attention_mask: Optional[mx.array] = None,
     ) -> mx.array:
         """Encode audio features into sequence embeddings.
 
@@ -530,7 +529,7 @@ class AudioEncoder(nn.Module):
 
         aftercnn_lens_np = np.array(aftercnn_lens)
         window_aftercnn = max_len_after_cnn * (
-            self.n_window_infer // (self.n_window * 2)
+                self.n_window_infer // (self.n_window * 2)
         )
         cu_seqlens = self._build_cu_seqlens(aftercnn_lens_np, window_aftercnn)
         attention_mask = self._create_block_attention_mask(
@@ -556,7 +555,7 @@ class TextAttention(nn.Module):
         self.num_heads = config.num_attention_heads
         self.num_kv_heads = config.num_key_value_heads
         self.head_dim = config.head_dim
-        self.scale = self.head_dim**-0.5
+        self.scale = self.head_dim ** -0.5
 
         self.q_proj = nn.Linear(
             config.hidden_size, self.num_heads * self.head_dim, bias=False
@@ -576,7 +575,7 @@ class TextAttention(nn.Module):
         self.rope = nn.RoPE(self.head_dim, traditional=False, base=config.rope_theta)
 
     def __call__(
-        self, hidden_states: mx.array, cache: Optional[Any] = None
+            self, hidden_states: mx.array, cache: Optional[Any] = None
     ) -> mx.array:
         B, L, _ = hidden_states.shape
         queries = self.q_proj(hidden_states).reshape(
@@ -643,7 +642,7 @@ class TextDecoderLayer(nn.Module):
         )
 
     def __call__(
-        self, hidden_states: mx.array, cache: Optional[Any] = None
+            self, hidden_states: mx.array, cache: Optional[Any] = None
     ) -> mx.array:
         residual = hidden_states
         hidden_states = self.self_attn(self.input_layernorm(hidden_states), cache=cache)
@@ -661,10 +660,10 @@ class TextModel(nn.Module):
         self.norm = nn.RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
     def __call__(
-        self,
-        input_ids: Optional[mx.array] = None,
-        inputs_embeds: Optional[mx.array] = None,
-        cache: Optional[List[Any]] = None,
+            self,
+            input_ids: Optional[mx.array] = None,
+            inputs_embeds: Optional[mx.array] = None,
+            cache: Optional[List[Any]] = None,
     ) -> mx.array:
         hidden_states = (
             inputs_embeds if inputs_embeds is not None else self.embed_tokens(input_ids)
@@ -692,19 +691,19 @@ class Qwen3ASRModel(nn.Module):
         )
 
     def get_audio_features(
-        self,
-        input_features: mx.array,
-        feature_attention_mask: Optional[mx.array] = None,
+            self,
+            input_features: mx.array,
+            feature_attention_mask: Optional[mx.array] = None,
     ) -> mx.array:
         return self.audio_tower(input_features, feature_attention_mask)
 
     def __call__(
-        self,
-        input_ids: mx.array,
-        input_embeddings: Optional[mx.array] = None,
-        input_features: Optional[mx.array] = None,
-        feature_attention_mask: Optional[mx.array] = None,
-        cache: Optional[List[Any]] = None,
+            self,
+            input_ids: mx.array,
+            input_embeddings: Optional[mx.array] = None,
+            input_features: Optional[mx.array] = None,
+            feature_attention_mask: Optional[mx.array] = None,
+            cache: Optional[List[Any]] = None,
     ) -> mx.array:
         inputs_embeds = (
             input_embeddings
@@ -713,7 +712,7 @@ class Qwen3ASRModel(nn.Module):
         )
 
         if input_features is not None and (
-            cache is None or cache[0] is None or cache[0].offset == 0
+                cache is None or cache[0] is None or cache[0].offset == 0
         ):
             audio_features = self.get_audio_features(
                 input_features, feature_attention_mask
@@ -767,14 +766,14 @@ class Qwen3ASRModel(nn.Module):
         is_formatted = not any(k.startswith("thinker.") for k in weights.keys())
         for k, v in weights.items():
             if k.startswith("thinker."):
-                k = k[len("thinker.") :]
+                k = k[len("thinker."):]
             if k == "lm_head.weight":
                 continue
             if (
-                not is_formatted
-                and "conv2d" in k
-                and "weight" in k
-                and len(v.shape) == 4
+                    not is_formatted
+                    and "conv2d" in k
+                    and "weight" in k
+                    and len(v.shape) == 4
             ):
                 v = v.transpose(0, 2, 3, 1)
             sanitized[k] = v
@@ -787,7 +786,7 @@ class Qwen3ASRModel(nn.Module):
 
 
 def load_qwen3_asr(
-    model_path: str,
+        model_path: str,
 ) -> Tuple[Qwen3ASRModel, TokenizerLike, FeatureExtractorLike]:
     """Load aligned weights + preprocessing so inference stays consistent."""
     import os
@@ -883,12 +882,12 @@ def load_qwen3_asr(
 
 
 def transcribe(
-    model: Qwen3ASRModel,
-    tokenizer: TokenizerLike,
-    feature_extractor: FeatureExtractorLike,
-    audio: np.ndarray,
-    language: str = "English",
-    max_tokens: int = 8192,
+        model: Qwen3ASRModel,
+        tokenizer: TokenizerLike,
+        feature_extractor: FeatureExtractorLike,
+        audio: np.ndarray,
+        language: str = "English",
+        max_tokens: int = 8192,
 ) -> Generator[str, None, None]:
     """Stream tokens to keep transcription latency low."""
     from mlx_lm.generate import generate_step
@@ -960,10 +959,10 @@ def transcribe(
     eos_token_ids = [151645, 151643]
 
     for token, _ in generate_step(
-        prompt=prompt_ids,
-        input_embeddings=input_embeddings,
-        model=model,
-        max_tokens=max_tokens,
+            prompt=prompt_ids,
+            input_embeddings=input_embeddings,
+            model=model,
+            max_tokens=max_tokens,
     ):
         if token in eos_token_ids:
             break
@@ -987,18 +986,18 @@ class RealtimeTranscriber:
     """Encapsulates the async pipeline so capture, VAD, and ASR stay coordinated."""
 
     def __init__(
-        self,
-        model_path: str = DEFAULT_ASR_MODEL,
-        language: str = DEFAULT_LANGUAGE,
-        transcribe_interval: float = DEFAULT_TRANSCRIBE_INTERVAL,
-        vad_frame_ms: int = DEFAULT_VAD_FRAME_MS,
-        vad_mode: int = DEFAULT_VAD_MODE,
-        vad_silence_ms: int = DEFAULT_VAD_SILENCE_MS,
-        min_words: int = DEFAULT_MIN_WORDS,
-        analyze: bool = False,
-        llm_model: Optional[str] = None,
-        device: Optional[int] = None,
-        no_ui: bool = False,
+            self,
+            model_path: str = DEFAULT_ASR_MODEL,
+            language: str = DEFAULT_LANGUAGE,
+            transcribe_interval: float = DEFAULT_TRANSCRIBE_INTERVAL,
+            vad_frame_ms: int = DEFAULT_VAD_FRAME_MS,
+            vad_mode: int = DEFAULT_VAD_MODE,
+            vad_silence_ms: int = DEFAULT_VAD_SILENCE_MS,
+            min_words: int = DEFAULT_MIN_WORDS,
+            analyze: bool = False,
+            llm_model: Optional[str] = None,
+            device: Optional[int] = None,
+            no_ui: bool = False,
     ):
         self.model_path = model_path
         self.language = language
@@ -1107,7 +1106,7 @@ class RealtimeTranscriber:
 
     def _render_transcript_panel(self) -> Panel:
         body = Text()
-        for transcript, analysis in self.ui_history[-self.ui_max_history :]:
+        for transcript, analysis in self.ui_history[-self.ui_max_history:]:
             body.append("> ", style="bold green")
             body.append(transcript)
             body.append("\n")
@@ -1179,10 +1178,10 @@ class RealtimeTranscriber:
         n = frame.size
         end = self.buffer_write_pos + n
         if end <= self.max_buffer_samples:
-            self.audio_buffer[self.buffer_write_pos : end] = frame
+            self.audio_buffer[self.buffer_write_pos: end] = frame
         else:
             first = self.max_buffer_samples - self.buffer_write_pos
-            self.audio_buffer[self.buffer_write_pos :] = frame[:first]
+            self.audio_buffer[self.buffer_write_pos:] = frame[:first]
             self.audio_buffer[: end % self.max_buffer_samples] = frame[first:]
         self.buffer_write_pos = end % self.max_buffer_samples
         self.buffer_filled = min(self.max_buffer_samples, self.buffer_filled + n)
@@ -1228,7 +1227,7 @@ class RealtimeTranscriber:
         turn_complete = False
         while self.vad_residual.size >= self.vad_frame_samples:
             chunk = self.vad_residual[: self.vad_frame_samples]
-            self.vad_residual = self.vad_residual[self.vad_frame_samples :]
+            self.vad_residual = self.vad_residual[self.vad_frame_samples:]
             is_speech = self.vad.is_speech(chunk.tobytes(), self.sample_rate)
             if is_speech:
                 self.ui_vad_state = "speech"
@@ -1254,7 +1253,7 @@ class RealtimeTranscriber:
         parts = []
         with _suppress_output():
             for token in transcribe(
-                self.model, self.tokenizer, self.feature_extractor, audio, self.language
+                    self.model, self.tokenizer, self.feature_extractor, audio, self.language
             ):
                 parts.append(token)
         return "".join(parts).strip()
@@ -1300,8 +1299,8 @@ class RealtimeTranscriber:
     async def _handle_turn_complete(self) -> None:
         """Emit a final turn result once VAD indicates completion."""
         if (
-            not self.current_transcript
-            or self.current_transcript == self.last_transcript
+                not self.current_transcript
+                or self.current_transcript == self.last_transcript
         ):
             return
         if not self._is_meaningful(self.current_transcript):
@@ -1358,8 +1357,8 @@ class RealtimeTranscriber:
             now = self.loop.time()
             if now - last_transcribe >= self.transcribe_interval:
                 if (
-                    self.total_samples_written - self.last_transcribed_sample
-                    >= min_new_samples
+                        self.total_samples_written - self.last_transcribed_sample
+                        >= min_new_samples
                 ):
                     async with self.buffer_lock:
                         audio_int16 = self._get_recent_audio(self.max_buffer_seconds)
@@ -1406,8 +1405,8 @@ class RealtimeTranscriber:
                                     f"  [cyan]Intent:[/cyan] {analysis['intent']}"
                                 )
                                 if (
-                                    analysis["entities"]
-                                    and analysis["entities"].lower() != "none"
+                                        analysis["entities"]
+                                        and analysis["entities"].lower() != "none"
                                 ):
                                     self.console_out.print(
                                         f"  [cyan]Entities:[/cyan] {analysis['entities']}"
@@ -1434,7 +1433,7 @@ class RealtimeTranscriber:
                             width = max(width, 10)
                             display_text = self.current_transcript
                             if len(display_text) > width:
-                                display_text = "..." + display_text[-(width - 3) :]
+                                display_text = "..." + display_text[-(width - 3):]
 
                             sys.stdout.write(f"\r\033[K  \033[2m{display_text}\033[0m")
                             sys.stdout.flush()
@@ -1470,7 +1469,7 @@ class RealtimeTranscriber:
             sys.stderr = io.StringIO()
             try:
                 dummy_audio = (
-                    np.random.randn(self.sample_rate).astype(np.float32) * 0.01
+                        np.random.randn(self.sample_rate).astype(np.float32) * 0.01
                 )
                 list(
                     transcribe(
