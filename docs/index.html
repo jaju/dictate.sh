@@ -362,7 +362,10 @@
             <span style="color: #6b7280;">$</span> uv run stt.py --model mlx-community/Qwen3-ASR-1.7B-8bit<br />
             <span style="color: #6b7280;">$</span> uv run stt.py --analyze --llm-model mlx-community/Mistral-7B-Instruct-v0.2-4bit<br /><br />
             <span style="color: #6b7280;"># Tune latency & VAD</span><br />
-            <span style="color: #6b7280;">$</span> uv run stt.py --transcribe-interval 0.2 --vad-silence-ms 300
+            <span style="color: #6b7280;">$</span> uv run stt.py --transcribe-interval 0.2 --vad-silence-ms 300<br /><br />
+            <span style="color: #6b7280;"># Save transcripts to a file</span><br />
+            <span style="color: #6b7280;">$</span> uv run stt.py | tee transcripts.txt<br />
+            <span style="color: #6b7280;">$</span> uv run stt.py &gt; transcripts.txt
           </div>
         </div>
       </section>
