@@ -1395,31 +1395,29 @@ class RealtimeTranscriber:
                 self.ui_partial = ""
                 self._update_ui(force=True)
 
-                if not self.live:
-                    if is_tty:
-                        sys.stdout.write("\r\033[K")
-                        self.console_out.print(f"[bold green]>[/bold green] {transcript}")
-                        if analysis:
-                            if analysis["intent"] or analysis["action"]:
+                if not is_tty:
+                    # Clean output for piping (works with or without live UI)
+                    os.write(1, f"{transcript}\n".encode())
+                elif not self.live:
+                    sys.stdout.write("\r\033[K")
+                    self.console_out.print(f"[bold green]>[/bold green] {transcript}")
+                    if analysis:
+                        if analysis["intent"] or analysis["action"]:
+                            self.console_out.print(
+                                f"  [cyan]Intent:[/cyan] {analysis['intent']}"
+                            )
+                            if (
+                                    analysis["entities"]
+                                    and analysis["entities"].lower() != "none"
+                            ):
                                 self.console_out.print(
-                                    f"  [cyan]Intent:[/cyan] {analysis['intent']}"
+                                    f"  [cyan]Entities:[/cyan] {analysis['entities']}"
                                 )
-                                if (
-                                        analysis["entities"]
-                                        and analysis["entities"].lower() != "none"
-                                ):
-                                    self.console_out.print(
-                                        f"  [cyan]Entities:[/cyan] {analysis['entities']}"
-                                    )
-                                if analysis["action"]:
-                                    self.console_out.print(
-                                        f"  [cyan]Action:[/cyan] {analysis['action']}"
-                                    )
-                            self.console_out.print()
-                    else:
-                        # Clean output for piping
-                        sys.stdout.write(f"{transcript}\n")
-                        sys.stdout.flush()
+                            if analysis["action"]:
+                                self.console_out.print(
+                                    f"  [cyan]Action:[/cyan] {analysis['action']}"
+                                )
+                        self.console_out.print()
 
                 last_displayed = ""
                 continue
