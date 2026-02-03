@@ -288,7 +288,7 @@
       <section class="hero">
         <h1>Local, real-time STT on Apple Silicon.</h1>
         <p>
-          Use speech models instantly with no complex setup.
+          Install once, transcribe instantly. No complex setup.
           Built on MLX for high-performance streaming and real-time processing entirely on-device.
           <strong>100% Offline. No data leaves your machine.</strong>
         </p>
@@ -306,11 +306,10 @@
             <span class="terminal-dot green"></span>
           </div>
           <div class="terminal">
-            <span style="color: #6b7280;">$</span> uv run https://dictate.sh/stt.py<br /><br />
-            <span style="color: #10b981;">INFO:</span> Fetching dependencies...<br />
+            <span style="color: #6b7280;">$</span> uv run dictate<br /><br />
             <span style="color: #10b981;">INFO:</span> Loading mlx-community/Qwen3-ASR-0.6B-8bit...<br />
+            <span style="color: #10b981;">INFO:</span> Listening...<br />
             <span style="color: #6b7280;">&gt;</span> "Running locally with no lag."<br />
-            <span style="color: #f59e0b;">Intent:</span> SYSTEM_CHECK<br />
           </div>
         </div>
       </div>
@@ -322,7 +321,7 @@
           <!-- Removed "Newest Models" card -->
           <div class="card">
             <h3>One-Line Install</h3>
-            <p>Zero configuration. Just <code>uv run</code> and you are streaming in seconds.</p>
+            <p>Zero configuration. Just <code>uv sync && uv run dictate</code> and you are streaming in seconds.</p>
           </div>
           <div class="card">
             <h3>MLX Powered</h3>
@@ -356,16 +355,16 @@
           </div>
           <div class="terminal">
             <span style="color: #6b7280;"># Use a specific input device</span><br />
-            <span style="color: #6b7280;">$</span> uv run stt.py --list-devices<br />
-            <span style="color: #6b7280;">$</span> uv run stt.py --device 1<br /><br />
+            <span style="color: #6b7280;">$</span> uv run dictate --list-devices<br />
+            <span style="color: #6b7280;">$</span> uv run dictate --device 1<br /><br />
             <span style="color: #6b7280;"># Switch models (ASR & LLM)</span><br />
-            <span style="color: #6b7280;">$</span> uv run stt.py --model mlx-community/Qwen3-ASR-1.7B-8bit<br />
-            <span style="color: #6b7280;">$</span> uv run stt.py --analyze --llm-model mlx-community/Mistral-7B-Instruct-v0.2-4bit<br /><br />
+            <span style="color: #6b7280;">$</span> uv run dictate --model mlx-community/Qwen3-ASR-1.7B-8bit<br />
+            <span style="color: #6b7280;">$</span> uv run dictate --analyze --llm-model mlx-community/Mistral-7B-Instruct-v0.2-4bit<br /><br />
             <span style="color: #6b7280;"># Tune latency & VAD</span><br />
-            <span style="color: #6b7280;">$</span> uv run stt.py --transcribe-interval 0.2 --vad-silence-ms 300<br /><br />
+            <span style="color: #6b7280;">$</span> uv run dictate --transcribe-interval 0.2 --vad-silence-ms 300<br /><br />
             <span style="color: #6b7280;"># Save transcripts to a file</span><br />
-            <span style="color: #6b7280;">$</span> uv run stt.py | tee transcripts.txt<br />
-            <span style="color: #6b7280;">$</span> uv run stt.py &gt; transcripts.txt
+            <span style="color: #6b7280;">$</span> uv run dictate | tee transcripts.txt<br />
+            <span style="color: #6b7280;">$</span> uv run dictate &gt; transcripts.txt
           </div>
         </div>
       </section>
