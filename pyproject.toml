@@ -9,11 +9,14 @@ dependencies = [
     "mlx-lm>=0.30.0",
     "numpy>=2.0",
     "sounddevice>=0.5",
-    "transformers>=4.47",
+    "transformers>=5.0.0rc3",
     "huggingface-hub>=0.27",
     "webrtcvad-wheels>=2.0.14",
     "rich>=14.0",
 ]
+
+[tool.uv]
+prerelease = "allow"
 
 [project.scripts]
 dictate = "dictate.cli:main"

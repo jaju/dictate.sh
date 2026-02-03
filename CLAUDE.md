@@ -9,7 +9,9 @@ Single-file Python script (`stt.py`, ~1688 lines) being refactored into a `src/d
 
 - Python 3.12+, `uv` for all commands (`uv sync`, `uv run`, `uv pip`)
 - Apple Silicon Mac required (MLX framework)
+- **Virtual env**: Use `.venv/bin/python` for running Python directly (NOT `uv run python`)
 - Run: `uv run stt.py` (current) → `uv run dictate` (after refactor)
+- Sanity checks: `.venv/bin/python -c "from dictate.xxx import ..."` to validate modules
 
 ## Work Protocol
 
