@@ -12,19 +12,29 @@ Voice-driven notes for Apple Silicon — speak, review, commit to markdown.
 │  │ detects turn  │ │ appears here │ │
 │  │ boundaries.   │ │ after you    │ │
 │  │               │ │ press Enter. │ │
-│  │ Press Enter   │ │              │ │
-│  │ when ready.   │ │ Saved to     │ │
-│  │               │ │ file auto.   │ │
+│  │ Tab/click to  │ │              │ │
+│  │ focus, then   │ │ Tab/click to │ │
+│  │ e to edit.    │ │ focus, then  │ │
+│  │ (in-memory)   │ │ e to edit.   │ │
 │  └───────────────┘ └──────────────┘ │
 │                                     │
-│  ␣ Record/Stop  ⏎ Commit  ⎋ Discard│
-│  q Quit                            │
+│  ␣ Rec  e Edit  ⏎ Commit  ⎋ Discard│
+│  q Quit                             │
 └─────────────────────────────────────┘
 ```
 
 Press **Space** to record. Speak naturally — VAD detects when you pause.
 Press **Enter** to send accumulated speech through an LLM for cleanup.
 Clean markdown appears in the right panel and is saved to disk.
+
+Both panels support modal editing. Panels have three visual states: **blue**
+(default), **orange** (selected via Tab/click — no cursor, no interaction),
+and **red** with an "EDIT" label (editing — cursor visible, full typing).
+Press **e** on a selected panel to enter edit mode. In edit mode, all keys
+type normally (Space, Enter, q, etc. insert text instead of triggering
+actions). Press **Ctrl+S** to save your edit, or **Escape** to cancel and revert.
+Left panel edits update the in-memory accumulator (for correcting speech before
+commit). Right panel edits write back to the notes file.
 
 All processing runs locally on your Mac's GPU via MLX. No cloud required
 (unless you choose a cloud LLM for rewriting).
@@ -35,7 +45,7 @@ uv run dictate notes --rewrite-model ollama/llama3.2
 
 ## Features
 
-- **Full-screen notes TUI** — two-panel Textual interface with push-to-record workflow
+- **Full-screen notes TUI** — two-panel Textual interface with push-to-record workflow and modal editing
 - Local, streaming ASR on Apple Silicon (MLX, Qwen3-ASR)
 - Voice activity detection (VAD) for automatic turn boundaries
 - **LLM rewriting** — each commit cleaned up via any [litellm](https://docs.litellm.ai/docs/providers)-compatible model
@@ -141,14 +151,24 @@ timestamped markdown files. Use `--notes-file` to write to a specific path inste
 |-----|--------|
 | `Space` | Start / stop recording |
 | `Enter` | Commit accumulated speech through LLM rewrite |
-| `Escape` | Discard accumulated text (with confirmation) |
-| `q` | Quit (saves uncommitted text raw to file) |
+| `e` | Enter edit mode on focused panel |
+| `Escape` | Cancel edit (in edit mode) / Discard accumulated text (normal mode) |
+| `Ctrl+S` | Save edit and exit edit mode |
+| `q` | Quit with confirmation (saves uncommitted text raw to file) |
 
-The left panel header shows the current state — "Paused" or "● Listening" — so you
-always know whether audio is being captured. Press Space to record, speak naturally,
-press Space to stop. Repeat to accumulate multiple turns. Press Enter when ready —
-the LLM rewrites your speech into clean markdown on the right panel and saves it to
-disk. Press Escape to discard and start over.
+**Normal mode:** All keys above trigger their actions. Tab or click to focus a panel
+(accent border appears). The left panel header shows "Paused" or "● Listening" so
+you always know whether audio is being captured.
+
+**Edit mode:** Press `e` on a focused panel to start editing. Space, Enter, q, and
+e all type normally into the editor. Press `Ctrl+S` to save or `Escape` to cancel
+and revert changes. Left panel edits update the in-memory accumulator; right panel
+edits write to the notes file.
+
+Press Space to record, speak naturally, press Space to stop. Repeat to accumulate
+multiple turns. Press Enter when ready — the LLM rewrites your speech into clean
+markdown on the right panel and saves it to disk. Press Escape to discard and start
+over.
 
 ## Domain Vocabulary and Context Biasing
 

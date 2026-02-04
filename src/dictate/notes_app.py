@@ -1,8 +1,8 @@
-"""Textual TUI for notes mode: speak, accumulate, commit through LLM rewrite.
+"""Textual TUI for notes mode: speak, accumulate, edit, commit through LLM rewrite.
 
-Left panel shows debounced, vocab-corrected speech. Press Enter to commit
-accumulated text through the rewrite LLM. Right panel shows rewritten output.
-Space to start/stop recording (push-to-talk). q quits and saves.
+Both panels are TextAreas that start read-only and non-focusable. Tab/click
+selects a panel (orange border, no cursor). Press `e` to enter edit mode
+(red border, cursor visible, full typing). Ctrl+S saves, Escape cancels.
 
 This module directly owns audio capture, VAD, and ASR — it does NOT use
 RealtimeTranscriber. The ASR model is pre-loaded by notes.run_notes_pipeline()
@@ -18,14 +18,13 @@ from typing import Any
 
 import numpy as np
 import sounddevice as sd
-from rich.rule import Rule
-from rich.text import Text
 from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal
+from textual.containers import Horizontal, Vertical
+from textual.events import Click
 from textual.screen import ModalScreen
-from textual.widgets import Footer, Header, RichLog, Static
+from textual.widgets import Header, Static, TextArea
 
 from dictate.audio.ring_buffer import RingBuffer
 from dictate.audio.vad import VadConfig, VoiceActivityDetector
@@ -39,6 +38,12 @@ from dictate.notes import NotesConfig, append_turn, write_session_header
 from dictate.protocols import FeatureExtractorLike, TokenizerLike
 from dictate.rewrite import RewriteResult, apply_vocab, rewrite_transcript
 from dictate.transcribe import is_meaningful, transcribe
+
+# Maps selected panel name to (container id, editor id)
+_PANEL_IDS: dict[str, tuple[str, str]] = {
+    "left": ("left-container", "speech-editor"),
+    "right": ("right-container", "output-editor"),
+}
 
 
 class DiscardConfirmScreen(ModalScreen[bool]):
@@ -76,8 +81,43 @@ class DiscardConfirmScreen(ModalScreen[bool]):
         self.dismiss(False)
 
 
+class QuitConfirmScreen(ModalScreen[bool]):
+    """Modal confirmation for quitting the app."""
+
+    CSS = """
+    QuitConfirmScreen {
+        align: center middle;
+    }
+    #quit-dialog {
+        width: 50;
+        height: 5;
+        border: thick $warning;
+        background: $surface;
+        padding: 1 2;
+        content-align: center middle;
+    }
+    """
+
+    BINDINGS = [
+        Binding("y", "confirm", "Yes", priority=True),
+        Binding("n", "cancel", "No", priority=True),
+        Binding("escape", "cancel", "Cancel", priority=True),
+    ]
+
+    def compose(self) -> ComposeResult:
+        yield Static(
+            "Quit and save? (y/n)", id="quit-dialog"
+        )
+
+    def action_confirm(self) -> None:
+        self.dismiss(True)
+
+    def action_cancel(self) -> None:
+        self.dismiss(False)
+
+
 class DictateNotesApp(App):
-    """Textual TUI for voice-driven notes with manual commit."""
+    """Textual TUI for voice-driven notes with modal editable panels."""
 
     TITLE = "Dictate Notes"
 
@@ -85,16 +125,45 @@ class DictateNotesApp(App):
     #middle {
         height: 1fr;
     }
-    #speech-panel {
+    #left-container {
         width: 40%;
         border: solid $primary;
-        padding: 1 2;
-        overflow-y: auto;
     }
-    #output-panel {
+    #left-container.-selected {
+        border: solid $accent;
+    }
+    #left-container.-editing {
+        border: heavy $error;
+        border-title-align: right;
+        border-title-color: $error;
+        border-subtitle-align: right;
+        border-subtitle-color: $error;
+    }
+    #speech-header {
+        height: auto;
+        padding: 0 1;
+    }
+    #speech-editor {
+        height: 1fr;
+        border: none;
+    }
+    #right-container {
         width: 60%;
-        border: solid $success;
-        padding: 1 2;
+        border: solid $primary;
+    }
+    #right-container.-selected {
+        border: solid $accent;
+    }
+    #right-container.-editing {
+        border: heavy $error;
+        border-title-align: right;
+        border-title-color: $error;
+        border-subtitle-align: right;
+        border-subtitle-color: $error;
+    }
+    #output-editor {
+        height: 1fr;
+        border: none;
     }
     #status-bar {
         height: 1;
@@ -108,8 +177,11 @@ class DictateNotesApp(App):
     BINDINGS = [
         Binding("enter", "commit", "Commit", priority=True),
         Binding("space", "toggle_recording", "Record/Stop", priority=True),
-        Binding("escape", "discard", "Discard", priority=True),
+        Binding("e", "edit_panel", "Edit", priority=True),
+        Binding("escape", "escape_action", "Esc", priority=True),
         Binding("q", "quit_app", "Quit", priority=True),
+        Binding("tab", "cycle_panel", "Tab", priority=True),
+        Binding("ctrl+s", "save_edit", "Save", priority=True, show=False),
     ]
 
     def __init__(
@@ -177,6 +249,15 @@ class DictateNotesApp(App):
         self._buffer_seconds: float = 0.0
         self._asr_ms: float | None = None
 
+        # Right panel dirty flag for debounced file writes
+        self._output_dirty: bool = False
+
+        # Panel selection & modal editing state
+        self._selected_panel: str | None = None  # "left" or "right"
+        self._editing: bool = False
+        self._editing_target: str | None = None  # "speech-editor" or "output-editor"
+        self._edit_snapshot: str = ""  # for cancel/revert
+
     def _state_header(self) -> str:
         """Return Rich-markup header line reflecting current recording state."""
         if self._recording:
@@ -186,18 +267,27 @@ class DictateNotesApp(App):
     def compose(self) -> ComposeResult:
         yield Header()
         with Horizontal(id="middle"):
-            yield Static(self._state_header(), id="speech-panel")
-            yield RichLog(id="output-panel", wrap=True, highlight=True)
+            with Vertical(id="left-container"):
+                yield Static(self._state_header(), id="speech-header")
+                yield TextArea("", id="speech-editor", read_only=True)
+            with Vertical(id="right-container"):
+                yield TextArea("", id="output-editor", read_only=True)
         yield Static("", id="status-bar")
-        yield Footer()
 
     def on_mount(self) -> None:
-        output = self.query_one("#output-panel", RichLog)
-        path_display = _short_path(self._notes_config.output_path)
-        output.write(Text(path_display, style="bold cyan"))
-        output.write(Rule())
+        # Disable focus on both TextAreas — no cursor, no arrow keys
+        self.query_one("#speech-editor", TextArea).can_focus = False
+        self.query_one("#output-editor", TextArea).can_focus = False
 
         write_session_header(self._notes_config.output_path)
+
+        # Load notes file into right panel
+        output = self.query_one("#output-editor", TextArea)
+        try:
+            content = self._notes_config.output_path.read_text()
+            output.text = content
+        except FileNotFoundError:
+            pass
 
         # Capture the running event loop for call_soon_threadsafe
         self._loop = asyncio.get_running_loop()
@@ -227,6 +317,36 @@ class DictateNotesApp(App):
 
         self._update_status_bar()
         self.set_interval(0.1, self._refresh_display)
+        self.set_interval(1.0, self._save_output_if_dirty)
+
+    # ── Click handling ───────────────────────────────────────────────
+
+    def on_click(self, event: Click) -> None:
+        """Select panel on click (when not editing)."""
+        if self._editing:
+            return
+        left = self.query_one("#left-container")
+        right = self.query_one("#right-container")
+        x, y = event.screen_x, event.screen_y
+        if left.region.contains(x, y):
+            self._select_panel("left")
+        elif right.region.contains(x, y):
+            self._select_panel("right")
+
+    # ── Panel selection ──────────────────────────────────────────────
+
+    def _select_panel(self, panel: str) -> None:
+        """Select a panel (orange border). Does NOT enter edit mode."""
+        left_c = self.query_one("#left-container")
+        right_c = self.query_one("#right-container")
+        left_c.remove_class("-selected")
+        right_c.remove_class("-selected")
+        container_id, _ = _PANEL_IDS[panel]
+        self.query_one(f"#{container_id}").add_class("-selected")
+        self._selected_panel = panel
+        self._update_status_bar()
+
+    # ── Audio ────────────────────────────────────────────────────────
 
     def _audio_callback(
         self,
@@ -358,6 +478,8 @@ class DictateNotesApp(App):
         self._last_transcribed_sample = self._ring_buffer.total_samples_written
         self._buffer_seconds = 0.0
 
+    # ── Display ──────────────────────────────────────────────────────
+
     def _update_status_bar(self) -> None:
         bar = self.query_one("#status-bar", Static)
         parts: list[str] = []
@@ -370,19 +492,31 @@ class DictateNotesApp(App):
         parts.append(f"Turns: {self._turn_count}")
 
         parts.append("|")
-        if self._committing:
-            parts.append("Rewriting...")
-        elif self._recording:
-            parts.append("\u25cf Recording")
+        if self._editing:
+            parts.append("^S Save  \u238b Cancel")
         else:
-            parts.append("\u25a0 Stopped")
-
-        parts.append("|")
-        parts.append("\u2423 Record/Stop  \u23ce Commit  q Quit")
+            parts.append(
+                "\u2423 Rec  \u21e5 Select  e Edit  \u23ce Commit  \u238b Discard  q Quit"
+            )
         bar.update(" ".join(parts))
+
+        # Header subtitle — mode indicator
+        if self._editing:
+            panel = "speech" if self._editing_target == "speech-editor" else "notes"
+            self.sub_title = f"Editing {panel}"
+        elif self._committing:
+            self.sub_title = "Rewriting\u2026"
+        elif self._recording:
+            self.sub_title = "\u25cf Recording"
+        else:
+            self.sub_title = ""
 
     def _refresh_display(self) -> None:
         self._update_status_bar()
+
+        # Update speech header
+        header = self.query_one("#speech-header", Static)
+        header.update(self._state_header())
 
         raw_partial = self._current_transcript
         now = time.monotonic()
@@ -397,40 +531,200 @@ class DictateNotesApp(App):
                 apply_vocab(raw_partial, vocab) if vocab else raw_partial
             )
 
-        # Compose left panel content
-        panel = self.query_one("#speech-panel", Static)
-        lines: list[str] = [self._state_header()]
+        # Only update left editor when NOT being edited
+        if not (self._editing and self._editing_target == "speech-editor"):
+            editor = self.query_one("#speech-editor", TextArea)
+            lines: list[str] = []
 
-        for turn_text in self._turn_accumulator:
-            lines.append(turn_text)
+            for turn_text in self._turn_accumulator:
+                lines.append(turn_text)
 
-        if self._turn_accumulator and self._current_partial:
-            lines.append("---")
+            if self._turn_accumulator and self._current_partial:
+                lines.append("---")
 
-        if self._current_partial:
-            lines.append(self._current_partial)
+            if self._current_partial:
+                lines.append(self._current_partial)
 
-        panel.update("\n\n".join(lines))
+            new_text = "\n\n".join(lines)
+            if editor.text != new_text:
+                editor.text = new_text
 
-    def action_commit(self) -> None:
+    def on_text_area_changed(self, event: TextArea.Changed) -> None:
+        """Track right-panel edits for debounced file save."""
+        if event.text_area.id == "output-editor":
+            self._output_dirty = True
+
+    def _save_output_if_dirty(self) -> None:
+        """Debounced write of right panel content to notes file."""
+        if self._output_dirty:
+            output = self.query_one("#output-editor", TextArea)
+            self._notes_config.output_path.write_text(output.text)
+            self._output_dirty = False
+
+    # ── Edit mode helpers ────────────────────────────────────────────
+
+    def _exit_edit_mode(self) -> None:
+        """Leave edit mode: restore read-only, disable focus, keep selected."""
+        if self._editing_target:
+            editor = self.query_one(f"#{self._editing_target}", TextArea)
+            editor.read_only = True
+            editor.can_focus = False
+
+            # Swap container class from -editing back to -selected
+            container_id = (
+                "left-container"
+                if self._editing_target == "speech-editor"
+                else "right-container"
+            )
+            container = self.query_one(f"#{container_id}")
+            container.remove_class("-editing")
+            container.add_class("-selected")
+            container.border_title = ""
+            container.border_subtitle = ""
+
+        self.set_focus(None)
+        self._editing = False
+        self._editing_target = None
+        self._edit_snapshot = ""
+        self._update_status_bar()
+
+    def _insert_into_editor(self, char: str) -> None:
+        """Insert a character into the active editing TextArea."""
+        if self._editing_target:
+            editor = self.query_one(f"#{self._editing_target}", TextArea)
+            editor.insert(char)
+
+    def _read_left_panel(self) -> str:
+        """Read text from the left panel."""
+        if self._editing_target == "speech-editor":
+            editor = self.query_one("#speech-editor", TextArea)
+            return editor.text.strip()
+
         text_parts = list(self._turn_accumulator)
         if self._current_partial:
             text_parts.append(self._current_partial)
+        return "\n\n".join(text_parts)
 
-        if not text_parts:
+    def _sync_left_editor_to_accumulator(self) -> None:
+        """Sync left TextArea content back to the turn accumulator."""
+        editor = self.query_one("#speech-editor", TextArea)
+        text = editor.text.strip()
+        self._turn_accumulator.clear()
+        if text:
+            self._turn_accumulator.append(text)
+        self._current_partial = ""
+        self._last_partial_raw = ""
+        self._current_transcript = ""
+
+    # ── Action handlers ──────────────────────────────────────────────
+
+    def action_cycle_panel(self) -> None:
+        """Tab: cycle selected panel (or insert tab in edit mode)."""
+        if self._editing:
+            self._insert_into_editor("    ")
+            return
+        if self._selected_panel == "left":
+            self._select_panel("right")
+        else:
+            self._select_panel("left")
+
+    def action_edit_panel(self) -> None:
+        """Enter edit mode on the selected panel."""
+        if self._editing:
+            self._insert_into_editor("e")
             return
 
-        combined = "\n\n".join(text_parts)
+        if self._selected_panel is None:
+            self.notify(
+                "Select a panel first (Tab or click)",
+                severity="warning",
+                timeout=2,
+            )
+            return
+
+        container_id, editor_id = _PANEL_IDS[self._selected_panel]
+        editor = self.query_one(f"#{editor_id}", TextArea)
+        container = self.query_one(f"#{container_id}")
+
+        self._editing = True
+        self._editing_target = editor_id
+        self._edit_snapshot = editor.text
+
+        editor.read_only = False
+        editor.can_focus = True
+        editor.focus()
+
+        container.remove_class("-selected")
+        container.add_class("-editing")
+        container.border_title = "EDIT"
+        container.border_subtitle = "^S Save  \u238b Cancel"
+
+        self._update_status_bar()
+
+    def action_save_edit(self) -> None:
+        """Save edit and exit edit mode (Ctrl+S)."""
+        if not self._editing:
+            return
+
+        if self._editing_target == "speech-editor":
+            self._sync_left_editor_to_accumulator()
+        elif self._editing_target == "output-editor":
+            self._save_output_if_dirty()
+
+        self._exit_edit_mode()
+        self.notify("Saved", severity="information", timeout=1)
+
+    def action_escape_action(self) -> None:
+        """Context-sensitive Escape: cancel edit or discard accumulated text."""
+        if self._editing:
+            # Revert to snapshot
+            if self._editing_target:
+                editor = self.query_one(f"#{self._editing_target}", TextArea)
+                editor.text = self._edit_snapshot
+            self._exit_edit_mode()
+            self.notify("Edit cancelled", severity="warning", timeout=1)
+            return
+
+        # Normal mode: discard
+        combined = self._read_left_panel()
+        if not combined:
+            self.notify("Nothing to discard", severity="warning", timeout=2)
+            return
+        self.push_screen(
+            DiscardConfirmScreen(), callback=self._on_discard_confirmed
+        )
+
+    def action_commit(self) -> None:
+        if self._editing:
+            self._insert_into_editor("\n")
+            return
+
+        combined = self._read_left_panel()
+        if not combined:
+            return
+
+        # Sync and clear state
         self._turn_accumulator.clear()
+        self._current_transcript = ""
         self._current_partial = ""
         self._last_partial_raw = ""
         self._committing = True
+
+        # Clear left editor
+        editor = self.query_one("#speech-editor", TextArea)
+        editor.text = ""
+
+        # Reset audio state so stale buffer doesn't re-populate the panel
+        if self._ring_buffer:
+            self._ring_buffer.reset()
+            self._last_transcribed_sample = (
+                self._ring_buffer.total_samples_written
+            )
+        if self._vad:
+            self._vad.reset()
+        self._buffer_seconds = 0.0
+
         self._update_status_bar()
-
-        # Update left panel immediately
-        panel = self.query_one("#speech-panel", Static)
-        panel.update("[dim]Rewriting...[/dim]")
-
         self._run_rewrite(combined)
 
     @work(exclusive=True, thread=True)
@@ -439,22 +733,30 @@ class DictateNotesApp(App):
         self.call_from_thread(self._on_rewrite_done, result)
 
     def _on_rewrite_done(self, result: RewriteResult) -> None:
-        output = self.query_one("#output-panel", RichLog)
-        if result.error:
-            output.write(
-                Text(f"[rewrite error: {result.error}]", style="bold red")
-            )
-            output.write(Text(result.original))
-        else:
-            output.write(Text(result.rewritten))
-        output.write(Rule())
+        # Flush any pending user edits to file before appending
+        self._save_output_if_dirty()
 
+        # Append structured turn to file
         append_turn(self._notes_config.output_path, result)
+
+        # Reload file content into right panel
+        output = self.query_one("#output-editor", TextArea)
+        try:
+            content = self._notes_config.output_path.read_text()
+            output.text = content
+            # Mark clean since we just loaded from file
+            self._output_dirty = False
+        except FileNotFoundError:
+            pass
 
         self._committing = False
         self._update_status_bar()
 
     def action_toggle_recording(self) -> None:
+        if self._editing:
+            self._insert_into_editor(" ")
+            return
+
         if not self._stream:
             return
 
@@ -477,14 +779,6 @@ class DictateNotesApp(App):
             self._recording = True
         self._update_status_bar()
 
-    def action_discard(self) -> None:
-        if not self._turn_accumulator and not self._current_partial:
-            self.notify("Nothing to discard", severity="warning", timeout=2)
-            return
-        self.push_screen(
-            DiscardConfirmScreen(), callback=self._on_discard_confirmed
-        )
-
     def _on_discard_confirmed(self, result: bool) -> None:
         if not result:
             return
@@ -492,6 +786,11 @@ class DictateNotesApp(App):
         self._current_partial = ""
         self._last_partial_raw = ""
         self._current_transcript = ""
+
+        # Clear left editor
+        editor = self.query_one("#speech-editor", TextArea)
+        editor.text = ""
+
         # Reset audio state to discard buffered audio
         if self._ring_buffer:
             self._ring_buffer.reset()
@@ -503,20 +802,31 @@ class DictateNotesApp(App):
         self._buffer_seconds = 0.0
 
     def action_quit_app(self) -> None:
-        # Save any uncommitted text raw to file
-        text_parts = list(self._turn_accumulator)
-        if self._current_partial:
-            text_parts.append(self._current_partial)
+        if self._editing:
+            self._insert_into_editor("q")
+            return
 
-        if text_parts:
-            combined = "\n\n".join(text_parts)
-            result = RewriteResult(
+        self.push_screen(
+            QuitConfirmScreen(), callback=self._on_quit_confirmed
+        )
+
+    def _on_quit_confirmed(self, result: bool) -> None:
+        if not result:
+            return
+
+        # Flush any pending right-panel edits
+        self._save_output_if_dirty()
+
+        # Save any uncommitted left-panel text raw to file
+        combined = self._read_left_panel()
+        if combined:
+            result_rw = RewriteResult(
                 original=combined,
                 rewritten="",
                 model=self._notes_config.rewrite.model,
                 error="uncommitted (quit)",
             )
-            append_turn(self._notes_config.output_path, result)
+            append_turn(self._notes_config.output_path, result_rw)
 
         # Stop audio stream
         if self._stream:
