@@ -258,7 +258,7 @@ def _run_notes(args: argparse.Namespace) -> int:
 
     rewrite_config = RewriteConfig(
         model=args.rewrite_model,
-        system_prompt=system_prompt or voiss_config.system_prompt or DEFAULT_REWRITE_SYSTEM_PROMPT,
+        system_prompt=system_prompt or voiss_config.prompt_file_content or voiss_config.system_prompt or DEFAULT_REWRITE_SYSTEM_PROMPT,
         vocab=voiss_config.replacements,
     )
     notes_config = NotesConfig(

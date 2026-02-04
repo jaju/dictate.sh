@@ -211,6 +211,29 @@ uv run voiss --context "Kubernetes, kubectl, etcd" --context-bias 4.0
 uv run voiss --context-file ~/vocab/medical-terms.txt
 ```
 
+### Default Prompt File
+
+Place a `rewrite_prompt.md` file in `~/.config/voiss/` to set a default system
+prompt for the rewrite LLM without needing CLI flags or JSON escaping:
+
+```bash
+cat > ~/.config/voiss/rewrite_prompt.md << 'EOF'
+You are a medical scribe. Format the transcript as SOAP notes:
+
+## Subjective
+## Objective
+## Assessment
+## Plan
+EOF
+```
+
+The full priority chain for the system prompt (first match wins):
+
+1. `--system-prompt` / `--system-prompt-file` (CLI flags)
+2. `~/.config/voiss/rewrite_prompt.md` (default prompt file)
+3. `system_prompt` field in `config.json`
+4. Built-in default prompt
+
 ### Via Configuration File
 
 voiss loads configuration from `~/.config/voiss/config.json`. All sections are

@@ -28,4 +28,5 @@ DEFAULT_REWRITE_SYSTEM_PROMPT: Final = (
 )
 DEFAULT_CONFIG_DIR: Final = "~/.config/voiss"
 DEFAULT_CONFIG_FILE: Final = "config.json"
+DEFAULT_PROMPT_FILE: Final = "rewrite_prompt.md"
 DEFAULT_CONTEXT_BIAS: Final = 5.0

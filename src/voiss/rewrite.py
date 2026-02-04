@@ -13,6 +13,7 @@ from voiss.constants import (
     DEFAULT_CONFIG_DIR,
     DEFAULT_CONFIG_FILE,
     DEFAULT_CONTEXT_BIAS,
+    DEFAULT_PROMPT_FILE,
     DEFAULT_REWRITE_MAX_TOKENS,
     DEFAULT_REWRITE_SYSTEM_PROMPT,
 )
@@ -27,6 +28,7 @@ class VoissConfig:
     bias_terms: tuple[str, ...] = ()
     bias_scale: float = DEFAULT_CONTEXT_BIAS
     system_prompt: str | None = None
+    prompt_file_content: str | None = None
 
 
 def load_config(path: str | None = None) -> VoissConfig:
@@ -50,11 +52,17 @@ def load_config(path: str | None = None) -> VoissConfig:
     else:
         config_path = config_dir / DEFAULT_CONFIG_FILE
 
+    # Check for default prompt file (independent of config.json)
+    prompt_file = config_dir / DEFAULT_PROMPT_FILE
+    prompt_file_content: str | None = None
+    if prompt_file.exists():
+        prompt_file_content = prompt_file.read_text().strip() or None
+
     if config_path.exists():
         with open(config_path) as f:
             data = json.load(f)
         if not isinstance(data, dict):
-            return VoissConfig()
+            return VoissConfig(prompt_file_content=prompt_file_content)
 
         # context — list of terms for ASR system prompt biasing
         context_terms: tuple[str, ...] = ()
@@ -89,9 +97,10 @@ def load_config(path: str | None = None) -> VoissConfig:
             bias_terms=bias_terms,
             bias_scale=bias_scale,
             system_prompt=system_prompt,
+            prompt_file_content=prompt_file_content,
         )
 
-    return VoissConfig()
+    return VoissConfig(prompt_file_content=prompt_file_content)
 
 
 @dataclass(frozen=True, slots=True)
