@@ -1,23 +1,46 @@
 # dictate.sh
 
-Real-time speech-to-text and voice-driven notes for Apple Silicon.
+Voice-driven notes for Apple Silicon — speak, review, commit to markdown.
 
-`dictate.sh` uses MLX for fast, local ASR (Qwen3-ASR) with VAD-based turn detection.
-Beyond live transcription, it supports a **notes mode** that pipes each spoken turn
-through an LLM (via [litellm](https://github.com/BerriAI/litellm)) to produce
-clean, structured markdown — useful for meeting notes, voice journaling,
-and domain-specific dictation.
+```
+┌─────────── Dictate Notes ───────────┐
+│                                     │
+│  ┌─ Speech ──────┐ ┌─ Notes ──────┐ │
+│  │               │ │              │ │
+│  │ You speak     │ │ LLM-cleaned  │ │
+│  │ here. VAD     │ │ markdown     │ │
+│  │ detects turn  │ │ appears here │ │
+│  │ boundaries.   │ │ after you    │ │
+│  │               │ │ press Enter. │ │
+│  │ Press Enter   │ │              │ │
+│  │ when ready.   │ │ Saved to     │ │
+│  │               │ │ file auto.   │ │
+│  └───────────────┘ └──────────────┘ │
+│                                     │
+│  ␣ Record/Stop  ⏎ Commit  q Quit   │
+└─────────────────────────────────────┘
+```
+
+Press **Space** to record. Speak naturally — VAD detects when you pause.
+Press **Enter** to send accumulated speech through an LLM for cleanup.
+Clean markdown appears in the right panel and is saved to disk.
+
+All processing runs locally on your Mac's GPU via MLX. No cloud required
+(unless you choose a cloud LLM for rewriting).
+
+```bash
+uv run dictate notes --rewrite-model ollama/llama3.2
+```
 
 ## Features
 
-- Low-latency, streaming ASR on Apple Silicon (MLX)
+- **Full-screen notes TUI** — two-panel Textual interface with push-to-record workflow
+- Local, streaming ASR on Apple Silicon (MLX, Qwen3-ASR)
 - Voice activity detection (VAD) for automatic turn boundaries
+- **LLM rewriting** — each commit cleaned up via any [litellm](https://docs.litellm.ai/docs/providers)-compatible model
 - **ASR context biasing** — supply domain vocabulary to improve transcription accuracy
-- **Notes mode** — LLM-rewritten markdown notes saved to file, per session
-- Configurable rewrite system prompts for domain-specific style and structure
-- Supports any litellm-compatible LLM backend (Ollama, OpenAI, Claude, etc.)
-- Optional intent analysis with a local LLM
-- Live terminal UI (Rich) with clean stdout for piping
+- Configurable system prompts for domain-specific output (SOAP notes, meeting minutes, etc.)
+- Also works as a **live transcription** pipe (`uv run dictate`)
 - Fully offline after models are downloaded (with local LLM backends)
 
 ## Requirements
@@ -30,16 +53,16 @@ and domain-specific dictation.
 
 ## Quick Start
 
-Live transcription (default mode):
-
-```bash
-uv run dictate
-```
-
-Notes mode — transcribe and rewrite into markdown:
+Notes mode (the main event):
 
 ```bash
 uv run dictate notes --rewrite-model ollama/llama3.2
+```
+
+Live transcription (simpler, no TUI):
+
+```bash
+uv run dictate
 ```
 
 With domain vocabulary for better transcription accuracy:
@@ -113,12 +136,13 @@ timestamped markdown files. Use `--notes-file` to write to a specific path inste
 
 | Key | Action |
 |-----|--------|
+| `Space` | Start / stop recording |
 | `Enter` | Commit accumulated speech through LLM rewrite |
-| `Space` | Pause / resume recording |
 | `q` | Quit (saves uncommitted text raw to file) |
 
-The notes TUI has two panels: the left panel (40%) shows accumulated speech turns
-with vocab corrections, and the right panel (60%) shows rewritten markdown output.
+The TUI starts stopped. Press Space to record, speak naturally, press Space to stop.
+Repeat to accumulate multiple turns. Press Enter when ready — the LLM rewrites your
+speech into clean markdown on the right panel and saves it to disk.
 
 ## ASR Context Biasing
 

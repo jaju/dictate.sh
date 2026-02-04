@@ -153,7 +153,7 @@ Notes mode uses a Textual full-screen TUI with manual commit workflow:
 - **Right panel** (60%): scrollable RichLog showing rewritten markdown, separated by rules.
 - **Footer**: live pipeline state (VAD, buffer, ASR latency, turn count) + key bindings.
 
-**Key bindings**: Enter commits accumulated text through LLM rewrite, Space pauses/resumes recording, q quits (saving uncommitted text raw).
+**Key bindings**: Space starts/stops recording (push-to-record), Enter commits accumulated text through LLM rewrite, q quits (saving uncommitted text raw).
 
 **VAD + manual commit coexistence**: `_handle_turn_complete()` still fires on VAD silence (required for ASR buffer management), but the `on_turn_complete` callback only appends to an accumulator list — it does not auto-trigger rewrite. The user presses Enter when ready to commit.
 

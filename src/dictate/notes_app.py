@@ -2,7 +2,7 @@
 
 Left panel shows debounced, vocab-corrected speech. Press Enter to commit
 accumulated text through the rewrite LLM. Right panel shows rewritten output.
-Space pauses/resumes recording. q quits and saves.
+Space to start/stop recording (push-to-talk). q quits and saves.
 
 This module directly owns audio capture, VAD, and ASR — it does NOT use
 RealtimeTranscriber. The ASR model is pre-loaded by notes.run_notes_pipeline()
@@ -70,7 +70,7 @@ class DictateNotesApp(App):
 
     BINDINGS = [
         Binding("enter", "commit", "Commit", priority=True),
-        Binding("space", "toggle_recording", "Pause/Resume", priority=True),
+        Binding("space", "toggle_recording", "Record/Stop", priority=True),
         Binding("q", "quit_app", "Quit", priority=True),
     ]
 
@@ -128,7 +128,7 @@ class DictateNotesApp(App):
         self._current_partial: str = ""
         self._last_partial_change: float = 0.0
         self._last_partial_raw: str = ""
-        self._recording: bool = True
+        self._recording: bool = False
         self._turn_count: int = 0
         self._committing: bool = False
         self._vad_state: str = "silence"
@@ -138,7 +138,7 @@ class DictateNotesApp(App):
     def compose(self) -> ComposeResult:
         yield Header()
         with Horizontal(id="middle"):
-            yield Static("Waiting for speech...", id="speech-panel")
+            yield Static("Press Space to start recording...", id="speech-panel")
             yield RichLog(id="output-panel", wrap=True, highlight=True)
         yield Static("", id="status-bar")
         yield Footer()
@@ -161,7 +161,7 @@ class DictateNotesApp(App):
         self._vad = VoiceActivityDetector(self._vad_config)
         self._audio_queue = asyncio.Queue(maxsize=DEFAULT_AUDIO_QUEUE_MAXSIZE)
 
-        # Start audio stream
+        # Create audio stream (stopped — user presses Space to record)
         stream_kwargs: dict[str, Any] = {}
         if self._device is not None:
             stream_kwargs["device"] = self._device
@@ -173,7 +173,6 @@ class DictateNotesApp(App):
             callback=self._audio_callback,
             **stream_kwargs,
         )
-        self._stream.start()
 
         # Launch processor as asyncio task on Textual's event loop
         self._processor_task = asyncio.create_task(self._processor())
@@ -322,10 +321,10 @@ class DictateNotesApp(App):
         elif self._recording:
             parts.append("\u25cf Recording")
         else:
-            parts.append("\u25a0 Paused")
+            parts.append("\u25a0 Stopped")
 
         parts.append("|")
-        parts.append("\u23ce Commit  \u2423 Pause/Resume  q Quit")
+        parts.append("\u2423 Record/Stop  \u23ce Commit  q Quit")
         bar.update(" ".join(parts))
 
     def _refresh_display(self) -> None:
@@ -357,7 +356,7 @@ class DictateNotesApp(App):
         if self._current_partial:
             lines.append(self._current_partial)
         elif not self._turn_accumulator:
-            lines.append("[dim]Waiting for speech...[/dim]")
+            lines.append("[dim]Press Space to start recording...[/dim]")
 
         panel.update("\n\n".join(lines))
 
@@ -402,7 +401,7 @@ class DictateNotesApp(App):
 
         self._committing = False
         panel = self.query_one("#speech-panel", Static)
-        panel.update("[dim]Waiting for speech...[/dim]")
+        panel.update("[dim]Press Space to start recording...[/dim]")
         self._update_status_bar()
 
     def action_toggle_recording(self) -> None:
@@ -413,6 +412,14 @@ class DictateNotesApp(App):
             self._stream.stop()
             self._recording = False
         else:
+            # Reset buffer/VAD so stale audio doesn't bleed into new recording
+            if self._ring_buffer:
+                self._ring_buffer.reset()
+            if self._vad:
+                self._vad.reset()
+            self._last_transcribed_sample = 0
+            self._current_transcript = ""
+            self._buffer_seconds = 0.0
             self._stream.start()
             self._recording = True
         self._update_status_bar()
