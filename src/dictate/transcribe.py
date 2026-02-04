@@ -4,10 +4,17 @@ The transcribe() generator yields tokens one at a time for low-latency
 display during real-time speech processing.
 """
 
+import re
 from collections.abc import Generator
 
 import mlx.core as mx
 import numpy as np
+
+
+def is_meaningful(text: str) -> bool:
+    """Filter out noise so we do not finalize junk output."""
+    cleaned = re.sub(r"[^\w]", "", text)
+    return len(cleaned) >= 2
 
 from dictate.model._utils import get_feat_extract_output_lengths
 from dictate.model.asr import Qwen3ASRModel

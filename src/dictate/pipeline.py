@@ -6,8 +6,6 @@ transcribe, analyze_intent, ui render functions).
 """
 
 import asyncio
-import io
-import re
 import shutil
 import signal
 import sys
@@ -39,14 +37,8 @@ from dictate.constants import (
 from dictate.env import LOGGER, suppress_output
 from dictate.model import load_qwen3_asr
 from dictate.protocols import FeatureExtractorLike, TokenizerLike
-from dictate.transcribe import transcribe
+from dictate.transcribe import is_meaningful, transcribe
 from dictate.ui import UiState, render_layout
-
-
-def is_meaningful(text: str) -> bool:
-    """Filter out noise so we do not finalize junk output."""
-    cleaned = re.sub(r"[^\w]", "", text)
-    return len(cleaned) >= 2
 
 
 class RealtimeTranscriber:
@@ -109,6 +101,7 @@ class RealtimeTranscriber:
         # Concurrency
         self.buffer_lock = asyncio.Lock()
         self.gpu_lock = asyncio.Lock()
+        self.stop_event: asyncio.Event | None = None
 
         # Transcript state
         self.current_transcript = ""
@@ -124,6 +117,7 @@ class RealtimeTranscriber:
             llm_model_name=self.llm_model_name,
             analyze_enabled=analyze,
         )
+        self.stream: sd.InputStream | None = None
         self.console_out = Console()
         self.console_ui = Console(stderr=True, force_terminal=True)
         self.live: Live | None = None
@@ -425,6 +419,7 @@ class RealtimeTranscriber:
             callback=self._audio_callback,
             **stream_kwargs,
         )
+        self.stream = stream
 
         info = (
             f"Language: {self.language} | "
@@ -439,19 +434,19 @@ class RealtimeTranscriber:
 
         stream.start()
 
-        tasks = [
-            asyncio.create_task(self._processor()),
-            asyncio.create_task(self._display()),
-        ]
+        tasks = [asyncio.create_task(self._processor())]
+        tasks.append(asyncio.create_task(self._display()))
 
         stop_event = asyncio.Event()
+        self.stop_event = stop_event
+
+        signal_handler_installed = False
 
         def signal_handler() -> None:
             if not stop_event.is_set():
                 self._log_info("Stopping...")
                 stop_event.set()
 
-        signal_handler_installed = False
         try:
             self.loop.add_signal_handler(signal.SIGINT, signal_handler)
             signal_handler_installed = True
