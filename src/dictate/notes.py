@@ -1,10 +1,9 @@
 """Notes pipeline: transcribe speech, rewrite via LLM, save to markdown.
 
 Orchestrates the STT pipeline with per-turn LLM rewriting and file output.
-Uses RealtimeTranscriber's on_turn_complete callback for integration.
+The ASR model is loaded before Textual starts to avoid subprocess/fd conflicts.
 """
 
-import asyncio
 import os
 from dataclasses import dataclass
 from datetime import datetime
@@ -12,7 +11,7 @@ from pathlib import Path
 
 from dictate.constants import DEFAULT_NOTES_DIR, DEFAULT_NOTES_DIR_ENV
 from dictate.env import LOGGER
-from dictate.rewrite import RewriteConfig, RewriteResult, rewrite_transcript
+from dictate.rewrite import RewriteConfig, RewriteResult
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,7 +74,7 @@ def append_turn(path: Path, result: RewriteResult) -> None:
         f.flush()
 
 
-async def run_notes_pipeline(
+def run_notes_pipeline(
     model_path: str,
     language: str,
     context: str | None,
@@ -87,45 +86,53 @@ async def run_notes_pipeline(
     device: int | None,
     notes_config: NotesConfig,
 ) -> None:
-    """Launch the STT pipeline with notes rewriting on turn completion."""
-    from dictate.pipeline import RealtimeTranscriber
+    """Load ASR model, warm up, then launch the Textual TUI.
 
-    write_session_header(notes_config.output_path)
-    LOGGER.info("Notes file: %s", notes_config.output_path)
+    Model loading and warmup happen *before* Textual starts because:
+    - huggingface_hub may spawn subprocesses (git) that fail under Textual
+    - suppress_output() uses os.dup2 which races with Textual's terminal
+    """
+    import numpy as np
+    from rich.console import Console
 
-    turn_count = 0
+    from dictate.env import suppress_output
+    from dictate.model import load_qwen3_asr
+    from dictate.transcribe import transcribe
 
-    async def on_turn_complete(transcript: str) -> None:
-        nonlocal turn_count
-        turn_count += 1
+    console = Console(stderr=True)
 
-        preview = transcript[:80] + ("..." if len(transcript) > 80 else "")
-        LOGGER.info("Turn %d: %s", turn_count, preview)
+    # Phase 1: Load model (may spawn subprocesses — must be pre-Textual)
+    console.print("[bold]Loading ASR model...[/bold]")
+    model, tokenizer, feature_extractor = load_qwen3_asr(model_path)
 
-        result = await asyncio.to_thread(
-            rewrite_transcript, transcript, notes_config.rewrite
+    # Phase 2: Warmup (fd-level suppress safe here — no Textual yet)
+    console.print("[dim]Warming up...[/dim]")
+    with suppress_output():
+        dummy = np.random.randn(16_000).astype(np.float32) * 0.01
+        list(
+            transcribe(
+                model, tokenizer, feature_extractor, dummy,
+                language, context=context,
+            )
         )
 
-        append_turn(notes_config.output_path, result)
+    console.print("[green]Ready.[/green]")
 
-        if not result.error:
-            LOGGER.info(
-                "Turn %d rewritten (%d chars)", turn_count, len(result.rewritten)
-            )
+    # Phase 3: Launch Textual (owns terminal from here)
+    from dictate.notes_app import DictateNotesApp
 
-    transcriber = RealtimeTranscriber(
-        model_path=model_path,
+    app = DictateNotesApp(
+        model=model,
+        tokenizer=tokenizer,
+        feature_extractor=feature_extractor,
         language=language,
+        context=context,
         transcribe_interval=transcribe_interval,
         vad_frame_ms=vad_frame_ms,
         vad_mode=vad_mode,
         vad_silence_ms=vad_silence_ms,
         min_words=min_words,
-        analyze=False,
         device=device,
-        no_ui=True,
-        context=context,
-        on_turn_complete=on_turn_complete,
+        notes_config=notes_config,
     )
-
-    await transcriber.run()
+    app.run()
