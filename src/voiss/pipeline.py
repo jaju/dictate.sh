@@ -6,6 +6,7 @@ transcribe, analyze_intent, ui render functions).
 """
 
 import asyncio
+import io
 import shutil
 import signal
 import sys
