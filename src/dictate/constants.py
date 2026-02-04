@@ -13,3 +13,14 @@ DEFAULT_VAD_SILENCE_MS: Final = 500
 DEFAULT_MIN_WORDS: Final = 3
 DEFAULT_MAX_BUFFER_SECONDS: Final = 30
 DEFAULT_AUDIO_QUEUE_MAXSIZE: Final = 200
+
+# Notes pipeline
+DEFAULT_NOTES_DIR: Final = "~/.local/share/dictate/notes"
+DEFAULT_NOTES_DIR_ENV: Final = "DICTATE_NOTES_DIR"
+DEFAULT_REWRITE_MAX_TOKENS: Final = 2048
+DEFAULT_REWRITE_SYSTEM_PROMPT: Final = (
+    "You are a note-taking assistant. Rewrite the following spoken transcript "
+    "into clean, structured markdown notes. Preserve all information but improve "
+    "clarity, fix grammar, and organize with headings or bullet points as "
+    "appropriate. Output only the markdown, no preamble."
+)

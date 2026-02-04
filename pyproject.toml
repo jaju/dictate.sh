@@ -13,6 +13,7 @@ dependencies = [
     "huggingface-hub>=0.27",
     "webrtcvad-wheels>=2.0.14",
     "rich>=14.0",
+    "litellm>=1.40",
 ]
 
 [tool.uv]
