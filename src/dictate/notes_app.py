@@ -127,6 +127,7 @@ class DictateNotesApp(App):
         device: int | None,
         notes_config: NotesConfig,
         energy_threshold: float = DEFAULT_ENERGY_THRESHOLD,
+        logit_bias: dict[int, float] | None = None,
     ) -> None:
         super().__init__()
         # Pre-loaded ASR model components
@@ -135,6 +136,7 @@ class DictateNotesApp(App):
         self._feature_extractor = feature_extractor
         self._language = language
         self._asr_context = context
+        self._logit_bias = logit_bias
         self._transcribe_interval = transcribe_interval
         self._min_words = min_words
         self._device = device
@@ -325,6 +327,7 @@ class DictateNotesApp(App):
                 audio,
                 self._language,
                 context=self._asr_context,
+                logit_bias=self._logit_bias,
             ):
                 parts.append(token)
         return "".join(parts).strip()

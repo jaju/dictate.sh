@@ -39,6 +39,7 @@ Processor Loop (async)
         ├─ WhisperFeatureExtractor → mel spectrogram
         ├─ AudioEncoder        — conv downsample + transformer
         ├─ Token generation    — streaming via generate_step
+        │   └─ logit_bias?     — additive bias on domain token logits
         └─ Update transcript
     │
     ▼ (on turn complete)
@@ -82,7 +83,8 @@ Display Loop (async)
   - `<|audio_pad|>` (id=151676) — placeholder for audio features
   - EOS tokens: 151645, 151643
 - Chat template format: `<|im_start|>system\n{context}<|im_end|>\n<|im_start|>user\n<|audio_start|>...<|audio_end|><|im_end|>\n<|im_start|>assistant\nlanguage English<asr_text>`
-- **Context biasing**: The system prompt accepts domain vocabulary text that biases the decoder toward specific terms. This is a native Qwen3-ASR feature trained during SFT. Exposed via `--context` / `--context-file` CLI flags.
+- **Context biasing (native SFT)**: The system prompt accepts domain vocabulary text that biases the decoder toward specific terms. This is a **native Qwen3-ASR capability trained during supervised fine-tuning** — the model was explicitly taught to attend to system prompt vocabulary during decoding. It is not a post-processing hack. Exposed via `--context` / `--context-file` CLI flags and the `context` list in `config.json`.
+- **Logit biasing (mechanical)**: Optionally, `--context-bias` enables additive logit biasing on subword tokens of context terms via `mlx_lm.sample_utils.make_logits_processors()`. This is a separate, cruder mechanism that directly increases token probabilities regardless of acoustic evidence. Useful as a supplementary nudge for stubborn misrecognitions, but not a substitute for the native SFT biasing.
 
 ## Concurrency Model
 
@@ -118,7 +120,7 @@ transcribe         (mlx, numpy, mlx_lm, model, protocols)
 audio/ring_buffer  (numpy)
 audio/vad          (numpy, webrtcvad)
 analysis           (re, mlx_lm, env, protocols)
-rewrite            (litellm, constants)
+rewrite            (litellm, json, pathlib, constants)  — also DictateConfig + load_config()
 notes              (pathlib, numpy, rich, constants, env, model, transcribe, notes_app)
 notes_app          (textual, rich, asyncio, numpy, sounddevice, notes, rewrite, transcribe, audio)
 ui                 (rich, analysis)
@@ -130,17 +132,32 @@ No circular dependencies. Strictly bottom-up.
 
 ## Notes Pipeline
 
-The notes mode (`dictate notes`) adds a two-layer approach for domain-accurate structured notes:
+The notes mode (`dictate notes`) uses a four-layer pipeline for domain-accurate structured notes:
 
 ```
-Layer 1: ASR Context Biasing
-    --context "Kubernetes, etcd, CoreDNS"
-    → injected into Qwen3-ASR system prompt
-    → decoder biased toward domain vocabulary during transcription
+Layer 1: ASR Context Biasing — native SFT (primary)
+    config.json → "context": ["Kubernetes", "etcd", "CoreDNS"]
+    --context "kubectl, Istio"  (merged with config terms)
+    → injected into Qwen3-ASR system prompt as vocabulary hint
+    → model was trained during SFT to attend to these terms
+    → the primary mechanism for domain vocabulary accuracy
 
-Layer 2: LLM Rewriting
+Layer 2: ASR Logit Biasing — mechanical (supplementary)
+    config.json → "bias": {"terms": ["kubectl"], "scale": 5.0}
+    --context-bias 4.0  (overrides config scale)
+    → context terms tokenized → subword token IDs → additive logit bias
+    → mlx_lm.sample_utils.make_logits_processors() → generate_step()
+    → blunt force: increases token probability regardless of acoustics
+    → use sparingly for terms that SFT biasing alone doesn't fix
+
+Layer 3: Post-ASR Replacements
+    config.json → "replacements": {"kube cuddle": "kubectl"}
+    → regex find-and-replace after transcription, before LLM rewrite
+    → catches deterministic ASR failure patterns
+
+Layer 4: LLM Rewriting
     --rewrite-model ollama/llama3.2
-    --system-prompt "Format as meeting minutes"
+    --system-prompt "Format as SOAP notes"
     → each finalized turn sent to external LLM via litellm
     → returns structured markdown appended to session file
 ```

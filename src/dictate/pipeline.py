@@ -38,7 +38,7 @@ from dictate.constants import (
 from dictate.env import LOGGER, suppress_output
 from dictate.model import load_qwen3_asr
 from dictate.protocols import FeatureExtractorLike, TokenizerLike
-from dictate.transcribe import is_meaningful, transcribe
+from dictate.transcribe import build_logit_bias, is_meaningful, transcribe
 from dictate.ui import UiState, render_layout
 
 
@@ -61,12 +61,16 @@ class RealtimeTranscriber:
         context: str | None = None,
         on_turn_complete: Callable[[str], Any] | None = None,
         energy_threshold: float = DEFAULT_ENERGY_THRESHOLD,
+        bias_terms: tuple[str, ...] = (),
+        context_bias: float | None = None,
     ) -> None:
         self.model_path = model_path
         self.language = language
         self.transcribe_interval = transcribe_interval
         self.context = context
         self.on_turn_complete = on_turn_complete
+        self.bias_terms = bias_terms
+        self.context_bias = context_bias
         self.min_words = min_words
         self.analyze = analyze
         self.llm_model_name = llm_model or DEFAULT_LLM_MODEL
@@ -84,6 +88,7 @@ class RealtimeTranscriber:
         self.model: Any = None
         self.tokenizer: TokenizerLike | None = None
         self.feature_extractor: FeatureExtractorLike | None = None
+        self.logit_bias: dict[int, float] | None = None
         self.llm: Any = None
         self.llm_tokenizer: TokenizerLike | None = None
 
@@ -165,6 +170,7 @@ class RealtimeTranscriber:
                 audio,
                 self.language,
                 context=self.context,
+                logit_bias=self.logit_bias,
             ):
                 parts.append(token)
         return "".join(parts).strip()
@@ -382,6 +388,12 @@ class RealtimeTranscriber:
             await asyncio.to_thread(load_qwen3_asr, self.model_path)
         )
 
+        # Build logit bias dict from bias terms (requires tokenizer)
+        if self.bias_terms and self.context_bias:
+            self.logit_bias = build_logit_bias(
+                self.bias_terms, self.tokenizer, self.context_bias
+            )
+
         # Prime caches and trigger one-time warnings off-screen.
         def warmup() -> None:
             old_stderr = sys.stderr
@@ -399,6 +411,7 @@ class RealtimeTranscriber:
                         dummy_audio,
                         self.language,
                         context=self.context,
+                        logit_bias=self.logit_bias,
                     )
                 )
             finally:

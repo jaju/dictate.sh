@@ -86,6 +86,8 @@ def run_notes_pipeline(
     device: int | None,
     notes_config: NotesConfig,
     energy_threshold: float = 300.0,
+    bias_terms: tuple[str, ...] = (),
+    context_bias: float | None = None,
 ) -> None:
     """Load ASR model, warm up, then launch the Textual TUI.
 
@@ -98,13 +100,18 @@ def run_notes_pipeline(
 
     from dictate.env import suppress_output
     from dictate.model import load_qwen3_asr
-    from dictate.transcribe import transcribe
+    from dictate.transcribe import build_logit_bias, transcribe
 
     console = Console(stderr=True)
 
     # Phase 1: Load model (may spawn subprocesses — must be pre-Textual)
     console.print("[bold]Loading ASR model...[/bold]")
     model, tokenizer, feature_extractor = load_qwen3_asr(model_path)
+
+    # Build logit bias dict from bias terms (requires tokenizer)
+    logit_bias: dict[int, float] | None = None
+    if bias_terms and context_bias:
+        logit_bias = build_logit_bias(bias_terms, tokenizer, context_bias)
 
     # Phase 2: Warmup (fd-level suppress safe here — no Textual yet)
     console.print("[dim]Warming up...[/dim]")
@@ -114,6 +121,7 @@ def run_notes_pipeline(
             transcribe(
                 model, tokenizer, feature_extractor, dummy,
                 language, context=context,
+                logit_bias=logit_bias,
             )
         )
 
@@ -136,5 +144,6 @@ def run_notes_pipeline(
         device=device,
         notes_config=notes_config,
         energy_threshold=energy_threshold,
+        logit_bias=logit_bias,
     )
     app.run()

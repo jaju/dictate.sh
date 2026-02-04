@@ -76,6 +76,12 @@ def _add_shared_stt_args(parser: argparse.ArgumentParser) -> None:
         help="File containing domain vocabulary for ASR context biasing",
     )
     parser.add_argument(
+        "--context-bias",
+        type=float,
+        default=None,
+        help="Additive logit bias scale for context terms during ASR decoding (default: from config or 5.0)",
+    )
+    parser.add_argument(
         "--energy-threshold",
         type=float,
         default=DEFAULT_ENERGY_THRESHOLD,
@@ -142,9 +148,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Output file path (default: auto-named in notes directory)",
     )
     notes_parser.add_argument(
-        "--vocab-file",
+        "--config-file",
         default=None,
-        help="JSON vocabulary corrections file (default: ~/.config/dictate/vocab.json)",
+        help="JSON config file (default: ~/.config/dictate/config.json)",
     )
 
     return parser
@@ -177,11 +183,38 @@ def _resolve_context(args: argparse.Namespace) -> str | None:
     return args.context
 
 
+def _merge_context(
+    cli_context: str | None,
+    config_context_terms: tuple[str, ...],
+) -> str | None:
+    """Merge config context terms with CLI --context into a single string.
+
+    Config terms come first; CLI terms are appended. The combined string
+    is injected into the Qwen3-ASR system prompt for native SFT-trained
+    context biasing.
+    """
+    parts: list[str] = list(config_context_terms)
+    if cli_context:
+        parts.extend(t.strip() for t in cli_context.split(",") if t.strip())
+    return ", ".join(parts) if parts else None
+
+
 def _run_transcribe(args: argparse.Namespace) -> int:
     """Run the original transcription pipeline."""
     import asyncio
 
     from dictate.pipeline import RealtimeTranscriber
+    from dictate.rewrite import load_config
+
+    dictate_config = load_config()
+    cli_context = _resolve_context(args)
+    context = _merge_context(cli_context, dictate_config.context_terms)
+
+    # Logit bias: merge config bias terms with CLI context terms
+    bias_terms = list(dictate_config.bias_terms)
+    if cli_context:
+        bias_terms.extend(t.strip() for t in cli_context.split(",") if t.strip())
+    bias_scale = args.context_bias if args.context_bias is not None else dictate_config.bias_scale
 
     transcriber = RealtimeTranscriber(
         model_path=args.model,
@@ -195,8 +228,10 @@ def _run_transcribe(args: argparse.Namespace) -> int:
         llm_model=args.llm_model,
         device=args.device,
         no_ui=args.no_ui,
-        context=_resolve_context(args),
+        context=context,
         energy_threshold=args.energy_threshold,
+        bias_terms=tuple(bias_terms),
+        context_bias=bias_scale,
     )
 
     asyncio.run(transcriber.run())
@@ -212,28 +247,38 @@ def _run_notes(args: argparse.Namespace) -> int:
         resolve_notes_path,
         run_notes_pipeline,
     )
-    from dictate.rewrite import RewriteConfig, load_vocab
+    from dictate.rewrite import RewriteConfig, load_config
 
     system_prompt = load_system_prompt(
         args.system_prompt,
         args.system_prompt_file,
     )
-    vocab = load_vocab(args.vocab_file)
+
+    dictate_config = load_config(args.config_file)
 
     rewrite_config = RewriteConfig(
         model=args.rewrite_model,
         system_prompt=system_prompt or DEFAULT_REWRITE_SYSTEM_PROMPT,
-        vocab=vocab,
+        vocab=dictate_config.replacements,
     )
     notes_config = NotesConfig(
         rewrite=rewrite_config,
         output_path=resolve_notes_path(args.notes_file),
     )
 
+    cli_context = _resolve_context(args)
+    context = _merge_context(cli_context, dictate_config.context_terms)
+
+    # Logit bias: merge config bias terms with CLI context terms
+    bias_terms = list(dictate_config.bias_terms)
+    if cli_context:
+        bias_terms.extend(t.strip() for t in cli_context.split(",") if t.strip())
+    bias_scale = args.context_bias if args.context_bias is not None else dictate_config.bias_scale
+
     run_notes_pipeline(
         model_path=args.model,
         language=args.language,
-        context=_resolve_context(args),
+        context=context,
         transcribe_interval=args.transcribe_interval,
         vad_frame_ms=args.vad_frame_ms,
         vad_mode=args.vad_mode,
@@ -242,6 +287,8 @@ def _run_notes(args: argparse.Namespace) -> int:
         device=args.device,
         notes_config=notes_config,
         energy_threshold=args.energy_threshold,
+        bias_terms=tuple(bias_terms),
+        context_bias=bias_scale,
     )
     return 0
 

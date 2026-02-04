@@ -1,0 +1,28 @@
+{
+  "context": [
+    "acetaminophen", "ibuprofen", "metformin", "lisinopril", "amoxicillin",
+    "atorvastatin", "omeprazole", "levothyroxine", "prednisone",
+    "hypertension", "hypotension", "tachycardia", "bradycardia",
+    "diabetes", "hypothyroidism", "hyperlipidemia",
+    "echocardiogram", "colonoscopy", "endoscopy", "spirometry",
+    "thoracic", "lumbar", "cervical", "bilateral",
+    "SOAP", "CBC", "MRI", "CT", "EKG", "ICU", "BMI",
+    "systolic", "diastolic", "milligrams"
+  ],
+  "replacements": {
+    "echo cardiogram": "echocardiogram",
+    "die a beat ease": "diabetes",
+    "high per tension": "hypertension",
+    "a set a minivan": "acetaminophen",
+    "lice in oh pril": "lisinopril",
+    "a tour va statin": "atorvastatin"
+  },
+  "bias": {
+    "terms": [
+      "acetaminophen", "echocardiogram", "metformin",
+      "lisinopril", "atorvastatin", "levothyroxine",
+      "spirometry", "hyperlipidemia"
+    ],
+    "scale": 5.0
+  }
+}

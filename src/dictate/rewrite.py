@@ -11,10 +11,80 @@ from pathlib import Path
 
 from dictate.constants import (
     DEFAULT_CONFIG_DIR,
+    DEFAULT_CONFIG_FILE,
+    DEFAULT_CONTEXT_BIAS,
     DEFAULT_REWRITE_MAX_TOKENS,
     DEFAULT_REWRITE_SYSTEM_PROMPT,
-    DEFAULT_VOCAB_FILE,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class DictateConfig:
+    """Top-level configuration loaded from ~/.config/dictate/config.json."""
+
+    context_terms: tuple[str, ...] = ()
+    replacements: dict[str, str] = field(default_factory=dict)
+    bias_terms: tuple[str, ...] = ()
+    bias_scale: float = DEFAULT_CONTEXT_BIAS
+
+
+def load_config(path: str | None = None) -> DictateConfig:
+    """Load dictate configuration from a JSON file.
+
+    Reads ``~/.config/dictate/config.json`` (or the path given).
+    The config file supports three optional subtrees::
+
+        {
+          "context": ["Kubernetes", "kubectl", "etcd"],
+          "replacements": {"kube cuddle": "kubectl"},
+          "bias": {"terms": ["kubectl", "etcd"], "scale": 5.0}
+        }
+
+    Returns a default (empty) config if the file does not exist.
+    """
+    config_dir = Path(DEFAULT_CONFIG_DIR).expanduser()
+
+    if path is not None:
+        config_path = Path(path).expanduser()
+    else:
+        config_path = config_dir / DEFAULT_CONFIG_FILE
+
+    if config_path.exists():
+        with open(config_path) as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return DictateConfig()
+
+        # context — list of terms for ASR system prompt biasing
+        context_terms: tuple[str, ...] = ()
+        raw_context = data.get("context", [])
+        if isinstance(raw_context, list):
+            context_terms = tuple(str(t) for t in raw_context if t)
+
+        replacements = {}
+        raw_replacements = data.get("replacements", {})
+        if isinstance(raw_replacements, dict):
+            replacements = {str(k): str(v) for k, v in raw_replacements.items()}
+
+        bias_terms: tuple[str, ...] = ()
+        bias_scale = DEFAULT_CONTEXT_BIAS
+        raw_bias = data.get("bias", {})
+        if isinstance(raw_bias, dict):
+            raw_terms = raw_bias.get("terms", [])
+            if isinstance(raw_terms, list):
+                bias_terms = tuple(str(t) for t in raw_terms)
+            raw_scale = raw_bias.get("scale")
+            if isinstance(raw_scale, (int, float)):
+                bias_scale = float(raw_scale)
+
+        return DictateConfig(
+            context_terms=context_terms,
+            replacements=replacements,
+            bias_terms=bias_terms,
+            bias_scale=bias_scale,
+        )
+
+    return DictateConfig()
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,34 +105,6 @@ class RewriteResult:
     rewritten: str
     model: str
     error: str = ""
-
-
-def load_vocab(path: str | None = None) -> dict[str, str]:
-    """Load vocabulary corrections from a JSON file.
-
-    The file maps ASR misrecognitions to correct terms, e.g.::
-
-        {"Turing": "Tollring", "kube cuddle": "kubectl"}
-
-    Keys are case-insensitive patterns (matched as whole words).
-    If *path* is None, looks in ``~/.config/dictate/vocab.json``.
-    Returns an empty dict if the file does not exist.
-    """
-    if path is None:
-        path = str(
-            Path(DEFAULT_CONFIG_DIR).expanduser() / DEFAULT_VOCAB_FILE
-        )
-
-    p = Path(path).expanduser()
-    if not p.exists():
-        return {}
-
-    with open(p) as f:
-        data = json.load(f)
-
-    if not isinstance(data, dict):
-        return {}
-    return {str(k): str(v) for k, v in data.items()}
 
 
 def apply_vocab(text: str, vocab: dict[str, str]) -> str:

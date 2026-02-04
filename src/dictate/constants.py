@@ -26,4 +26,5 @@ DEFAULT_REWRITE_SYSTEM_PROMPT: Final = (
     "Reply with only the cleaned text, nothing else."
 )
 DEFAULT_CONFIG_DIR: Final = "~/.config/dictate"
-DEFAULT_VOCAB_FILE: Final = "vocab.json"
+DEFAULT_CONFIG_FILE: Final = "config.json"
+DEFAULT_CONTEXT_BIAS: Final = 5.0

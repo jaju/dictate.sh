@@ -104,6 +104,7 @@ uv run dictate notes --rewrite-model ollama/llama3.2 \
 | `--language` | `English` | Transcription language |
 | `--context` | — | Domain vocabulary for ASR context biasing |
 | `--context-file` | — | File containing domain vocabulary |
+| `--context-bias` | `5.0` | Additive logit bias scale for context terms |
 | `--transcribe-interval` | `0.5` | Seconds between ASR updates |
 | `--vad-frame-ms` | `30` | VAD frame size (10/20/30) |
 | `--vad-mode` | `3` | VAD aggressiveness (0-3) |
@@ -129,7 +130,7 @@ uv run dictate notes --rewrite-model ollama/llama3.2 \
 | `--system-prompt` | System prompt to guide rewriting style |
 | `--system-prompt-file` | Path to file containing the system prompt |
 | `--notes-file` | Output file path (default: auto-named in notes directory) |
-| `--vocab-file` | JSON vocabulary corrections file (default: `~/.config/dictate/vocab.json`) |
+| `--config-file` | JSON config file for context, replacements, and bias (default: `~/.config/dictate/config.json`) |
 
 Notes are saved to `$DICTATE_NOTES_DIR` (default: `~/.local/share/dictate/notes/`) as
 timestamped markdown files. Use `--notes-file` to write to a specific path instead.
@@ -149,21 +150,74 @@ press Space to stop. Repeat to accumulate multiple turns. Press Enter when ready
 the LLM rewrites your speech into clean markdown on the right panel and saves it to
 disk. Press Escape to discard and start over.
 
-## ASR Context Biasing
+## Domain Vocabulary and Context Biasing
 
-Qwen3-ASR supports context biasing — you can supply domain-specific terms, acronyms,
-or names that the model will prefer during decoding. This is built into the model's
-architecture (trained during SFT), not a post-processing hack.
+Qwen3-ASR has a **native context biasing capability trained during supervised fine-tuning
+(SFT)** — the model was explicitly taught to attend to vocabulary hints in its system
+prompt during decoding. This is the primary mechanism for improving transcription accuracy
+on domain-specific terms, and it works well out of the box.
 
-Use `--context` for inline terms or `--context-file` to load from a file:
+dictate builds on this with two additional layers for cases where native biasing isn't
+enough:
+
+1. **Prompt context biasing (native SFT)** — domain terms are injected into the Qwen3-ASR
+   system prompt. The model was trained to prefer these terms during decoding. This is the
+   recommended starting point and usually sufficient.
+
+2. **Logit biasing (mechanical supplement)** — optionally, `--context-bias` applies an
+   additive logit bias to the subword tokens of context terms during decoding. This directly
+   increases token probability regardless of acoustic evidence. Useful as a nudge for
+   stubborn misrecognitions, but too high a value can cause hallucination. Use sparingly.
+
+3. **Post-ASR replacements** — the `replacements` section of `config.json` applies regex
+   find-and-replace after transcription. This is a last resort for deterministic ASR failure
+   patterns that neither prompt nor logit biasing can fix.
+
+### Via CLI
 
 ```bash
-# Inline domain vocabulary
-uv run dictate --context "MLX, Qwen, WebRTC, VAD, litellm"
+# Inline domain vocabulary — feeds native SFT context biasing
+uv run dictate --context "Kubernetes, kubectl, etcd, CoreDNS"
+
+# With supplementary logit biasing (default scale: 5.0)
+uv run dictate --context "Kubernetes, kubectl, etcd" --context-bias 4.0
 
 # From a file (one term per line, or freeform text)
 uv run dictate --context-file ~/vocab/medical-terms.txt
 ```
+
+### Via Configuration File
+
+dictate loads configuration from `~/.config/dictate/config.json`. All sections are
+optional. A sample config for clinical notes is provided in
+[`examples/config.json`](examples/config.json).
+
+```json
+{
+  "context": [
+    "acetaminophen", "ibuprofen", "metformin", "lisinopril",
+    "hypertension", "tachycardia", "echocardiogram",
+    "SOAP", "CBC", "MRI", "EKG"
+  ],
+  "replacements": {
+    "echo cardiogram": "echocardiogram",
+    "die a beat ease": "diabetes"
+  },
+  "bias": {
+    "terms": ["acetaminophen", "echocardiogram", "metformin"],
+    "scale": 5.0
+  }
+}
+```
+
+| Section | Purpose |
+|---------|---------|
+| **`context`** | Terms injected into the ASR system prompt for native SFT context biasing. This is the primary accuracy lever. |
+| **`replacements`** | Post-ASR regex find-and-replace (case-insensitive). Catches deterministic misrecognitions. |
+| **`bias.terms`** | Subset of terms whose subword tokens get additive logit bias during decoding. Reserve for the hardest words. |
+| **`bias.scale`** | Logit bias strength (default 5.0). Overridden by `--context-bias` on the CLI. |
+
+Config context terms and CLI `--context` terms are merged (config first, CLI appended).
 
 Context biasing works in both transcription and notes modes.
 
@@ -211,7 +265,8 @@ tail -f ~/.local/share/dictate/notes/*.md
 - **No audio**: check mic permissions or try `--list-devices` + `--device`
 - **Laggy output**: reduce `--transcribe-interval`
 - **Notes rewrite failures**: check that your LLM backend is running (e.g., `ollama serve`). Raw transcripts are saved on rewrite failure.
-- **Domain words misrecognized**: use `--context` or `--context-file` with your vocabulary
+- **Domain words misrecognized**: use `--context` or `--context-file` with your vocabulary. If prompt biasing alone isn't enough, the logit bias (`--context-bias`) will increase token probabilities directly. Try values between 3.0-8.0. Too high (>10) may cause hallucination of biased terms.
+- **Bias causing wrong words**: lower `--context-bias` (try 2.0-3.0) or remove overly broad terms from config
 
 ## Logging
 
