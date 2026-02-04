@@ -17,6 +17,7 @@
     "lice in oh pril": "lisinopril",
     "a tour va statin": "atorvastatin"
   },
+  "system_prompt": "You are a medical scribe. Rewrite the transcript into structured clinical notes using SOAP format.",
   "bias": {
     "terms": [
       "acetaminophen", "echocardiogram", "metformin",

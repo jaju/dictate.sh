@@ -26,6 +26,7 @@ class VoissConfig:
     replacements: dict[str, str] = field(default_factory=dict)
     bias_terms: tuple[str, ...] = ()
     bias_scale: float = DEFAULT_CONTEXT_BIAS
+    system_prompt: str | None = None
 
 
 def load_config(path: str | None = None) -> VoissConfig:
@@ -77,11 +78,17 @@ def load_config(path: str | None = None) -> VoissConfig:
             if isinstance(raw_scale, (int, float)):
                 bias_scale = float(raw_scale)
 
+        raw_system_prompt = data.get("system_prompt")
+        system_prompt: str | None = (
+            str(raw_system_prompt) if isinstance(raw_system_prompt, str) else None
+        )
+
         return VoissConfig(
             context_terms=context_terms,
             replacements=replacements,
             bias_terms=bias_terms,
             bias_scale=bias_scale,
+            system_prompt=system_prompt,
         )
 
     return VoissConfig()
