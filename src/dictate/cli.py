@@ -134,6 +134,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=None,
         help="Output file path (default: auto-named in notes directory)",
     )
+    notes_parser.add_argument(
+        "--vocab-file",
+        default=None,
+        help="JSON vocabulary corrections file (default: ~/.config/dictate/vocab.json)",
+    )
 
     return parser
 
@@ -201,16 +206,18 @@ def _run_notes(args: argparse.Namespace) -> int:
         resolve_notes_path,
         run_notes_pipeline,
     )
-    from dictate.rewrite import RewriteConfig
+    from dictate.rewrite import RewriteConfig, load_vocab
 
     system_prompt = load_system_prompt(
         args.system_prompt,
         args.system_prompt_file,
     )
+    vocab = load_vocab(args.vocab_file)
 
     rewrite_config = RewriteConfig(
         model=args.rewrite_model,
         system_prompt=system_prompt or DEFAULT_REWRITE_SYSTEM_PROMPT,
+        vocab=vocab,
     )
     notes_config = NotesConfig(
         rewrite=rewrite_config,

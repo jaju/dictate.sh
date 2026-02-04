@@ -19,8 +19,10 @@ DEFAULT_NOTES_DIR: Final = "~/.local/share/dictate/notes"
 DEFAULT_NOTES_DIR_ENV: Final = "DICTATE_NOTES_DIR"
 DEFAULT_REWRITE_MAX_TOKENS: Final = 2048
 DEFAULT_REWRITE_SYSTEM_PROMPT: Final = (
-    "You are a note-taking assistant. Rewrite the following spoken transcript "
-    "into clean, structured markdown notes. Preserve all information but improve "
-    "clarity, fix grammar, and organize with headings or bullet points as "
-    "appropriate. Output only the markdown, no preamble."
+    "Clean up the following speech transcript. Fix grammar, punctuation, and "
+    "filler words. Keep the original meaning and wording intact — do not add "
+    "commentary, interpretation, or new information. Format as markdown. "
+    "Reply with only the cleaned text, nothing else."
 )
+DEFAULT_CONFIG_DIR: Final = "~/.config/dictate"
+DEFAULT_VOCAB_FILE: Final = "vocab.json"
