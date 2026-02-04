@@ -146,6 +146,7 @@ class VoissNotesApp(App):
     #speech-editor {
         height: 1fr;
         border: none;
+        overflow-y: auto;
     }
     #right-container {
         width: 60%;
@@ -165,9 +166,11 @@ class VoissNotesApp(App):
         display: none;
         height: 1fr;
         border: none;
+        overflow-y: auto;
     }
     #output-display {
         height: 1fr;
+        overflow-y: auto;
     }
     #right-container.-editing #output-editor {
         display: block;
