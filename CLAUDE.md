@@ -16,10 +16,12 @@ Single-file Python script (`stt.py`, ~1688 lines) being refactored into a `src/d
 ## Work Protocol
 
 1. **Start of session**: Run `bd prime` for workflow context. Run `bd ready` to find unblocked work.
-2. **Before starting a task**: `bd show <id>` for full context. Update task descriptions of downstream tasks if current work clarifies details.
+2. **Before starting a task**: `bd show <id>` for full context.
 3. **Working on a task**: Set state with `bd update <id> --assignee claude`. Keep changes small and incremental.
-4. **Completing a task**: `bd close <id>`. Then `bd ready` for next task.
+4. **Completing a task**: `bd close <id>`. Then update descriptions of downstream/dependent tasks with any new context gained during implementation (concrete line numbers, API signatures, gotchas discovered). Then `bd ready` for next task.
 5. **End of session**: `bd sync` to persist state.
+
+**Dependency context propagation**: When completing a task, always check which tasks it blocks (`bd show <id>` lists blockers). Update those dependent tasks' descriptions with implementation details that will help the next session pick up work without re-exploring. This is critical for multi-session work.
 
 ## Issue Tracking
 
