@@ -85,6 +85,7 @@ def run_notes_pipeline(
     min_words: int,
     device: int | None,
     notes_config: NotesConfig,
+    energy_threshold: float = 300.0,
 ) -> None:
     """Load ASR model, warm up, then launch the Textual TUI.
 
@@ -134,5 +135,6 @@ def run_notes_pipeline(
         min_words=min_words,
         device=device,
         notes_config=notes_config,
+        energy_threshold=energy_threshold,
     )
     app.run()

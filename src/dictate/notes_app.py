@@ -24,12 +24,14 @@ from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal
+from textual.screen import ModalScreen
 from textual.widgets import Footer, Header, RichLog, Static
 
 from dictate.audio.ring_buffer import RingBuffer
 from dictate.audio.vad import VadConfig, VoiceActivityDetector
 from dictate.constants import (
     DEFAULT_AUDIO_QUEUE_MAXSIZE,
+    DEFAULT_ENERGY_THRESHOLD,
     DEFAULT_MAX_BUFFER_SECONDS,
     DEFAULT_SAMPLE_RATE,
 )
@@ -37,6 +39,41 @@ from dictate.notes import NotesConfig, append_turn, write_session_header
 from dictate.protocols import FeatureExtractorLike, TokenizerLike
 from dictate.rewrite import RewriteResult, apply_vocab, rewrite_transcript
 from dictate.transcribe import is_meaningful, transcribe
+
+
+class DiscardConfirmScreen(ModalScreen[bool]):
+    """Modal confirmation for discarding accumulated text."""
+
+    CSS = """
+    DiscardConfirmScreen {
+        align: center middle;
+    }
+    #discard-dialog {
+        width: 50;
+        height: 5;
+        border: thick $error;
+        background: $surface;
+        padding: 1 2;
+        content-align: center middle;
+    }
+    """
+
+    BINDINGS = [
+        Binding("y", "confirm", "Yes", priority=True),
+        Binding("n", "cancel", "No", priority=True),
+        Binding("escape", "cancel", "Cancel", priority=True),
+    ]
+
+    def compose(self) -> ComposeResult:
+        yield Static(
+            "Discard accumulated text? (y/n)", id="discard-dialog"
+        )
+
+    def action_confirm(self) -> None:
+        self.dismiss(True)
+
+    def action_cancel(self) -> None:
+        self.dismiss(False)
 
 
 class DictateNotesApp(App):
@@ -71,6 +108,7 @@ class DictateNotesApp(App):
     BINDINGS = [
         Binding("enter", "commit", "Commit", priority=True),
         Binding("space", "toggle_recording", "Record/Stop", priority=True),
+        Binding("escape", "discard", "Discard", priority=True),
         Binding("q", "quit_app", "Quit", priority=True),
     ]
 
@@ -88,6 +126,7 @@ class DictateNotesApp(App):
         min_words: int,
         device: int | None,
         notes_config: NotesConfig,
+        energy_threshold: float = DEFAULT_ENERGY_THRESHOLD,
     ) -> None:
         super().__init__()
         # Pre-loaded ASR model components
@@ -101,6 +140,7 @@ class DictateNotesApp(App):
         self._device = device
         self._notes_config = notes_config
         self._sample_rate = DEFAULT_SAMPLE_RATE
+        self._energy_threshold = energy_threshold
 
         # Audio components (created in on_mount)
         self._ring_buffer: RingBuffer | None = None
@@ -135,10 +175,16 @@ class DictateNotesApp(App):
         self._buffer_seconds: float = 0.0
         self._asr_ms: float | None = None
 
+    def _state_header(self) -> str:
+        """Return Rich-markup header line reflecting current recording state."""
+        if self._recording:
+            return "[bold green]\u2500\u2500 \u25cf Listening (Space to stop) \u2500\u2500[/bold green]"
+        return "[dim]\u2500\u2500 Paused (Space to record) \u2500\u2500[/dim]"
+
     def compose(self) -> ComposeResult:
         yield Header()
         with Horizontal(id="middle"):
-            yield Static("Press Space to start recording...", id="speech-panel")
+            yield Static(self._state_header(), id="speech-panel")
             yield RichLog(id="output-panel", wrap=True, highlight=True)
         yield Static("", id="status-bar")
         yield Footer()
@@ -218,6 +264,11 @@ class DictateNotesApp(App):
                 pass
 
             if frame is not None:
+                # RMS energy gate — skip near-silent frames before VAD
+                rms = np.sqrt(np.mean(frame.astype(np.float32) ** 2))
+                if rms < self._energy_threshold:
+                    continue
+
                 self._ring_buffer.append(frame)
                 turn_complete = self._vad.process(frame)
                 self._vad_state = self._vad.state
@@ -345,7 +396,7 @@ class DictateNotesApp(App):
 
         # Compose left panel content
         panel = self.query_one("#speech-panel", Static)
-        lines: list[str] = []
+        lines: list[str] = [self._state_header()]
 
         for turn_text in self._turn_accumulator:
             lines.append(turn_text)
@@ -355,8 +406,6 @@ class DictateNotesApp(App):
 
         if self._current_partial:
             lines.append(self._current_partial)
-        elif not self._turn_accumulator:
-            lines.append("[dim]Press Space to start recording...[/dim]")
 
         panel.update("\n\n".join(lines))
 
@@ -400,8 +449,6 @@ class DictateNotesApp(App):
         append_turn(self._notes_config.output_path, result)
 
         self._committing = False
-        panel = self.query_one("#speech-panel", Static)
-        panel.update("[dim]Press Space to start recording...[/dim]")
         self._update_status_bar()
 
     def action_toggle_recording(self) -> None:
@@ -411,7 +458,6 @@ class DictateNotesApp(App):
         if self._recording:
             self._stream.stop()
             self._recording = False
-            self.notify("Stopped", severity="warning", timeout=2)
         else:
             # Reset buffer/VAD so stale audio doesn't bleed into new recording
             if self._ring_buffer:
@@ -426,8 +472,32 @@ class DictateNotesApp(App):
             self._buffer_seconds = 0.0
             self._stream.start()
             self._recording = True
-            self.notify("Recording", severity="information", timeout=2)
         self._update_status_bar()
+
+    def action_discard(self) -> None:
+        if not self._turn_accumulator and not self._current_partial:
+            self.notify("Nothing to discard", severity="warning", timeout=2)
+            return
+        self.push_screen(
+            DiscardConfirmScreen(), callback=self._on_discard_confirmed
+        )
+
+    def _on_discard_confirmed(self, result: bool) -> None:
+        if not result:
+            return
+        self._turn_accumulator.clear()
+        self._current_partial = ""
+        self._last_partial_raw = ""
+        self._current_transcript = ""
+        # Reset audio state to discard buffered audio
+        if self._ring_buffer:
+            self._ring_buffer.reset()
+            self._last_transcribed_sample = (
+                self._ring_buffer.total_samples_written
+            )
+        if self._vad:
+            self._vad.reset()
+        self._buffer_seconds = 0.0
 
     def action_quit_app(self) -> None:
         # Save any uncommitted text raw to file

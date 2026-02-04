@@ -15,6 +15,7 @@ import os
 
 from dictate.constants import (
     DEFAULT_ASR_MODEL,
+    DEFAULT_ENERGY_THRESHOLD,
     DEFAULT_LANGUAGE,
     DEFAULT_MIN_WORDS,
     DEFAULT_TRANSCRIBE_INTERVAL,
@@ -73,6 +74,12 @@ def _add_shared_stt_args(parser: argparse.ArgumentParser) -> None:
         "--context-file",
         default=None,
         help="File containing domain vocabulary for ASR context biasing",
+    )
+    parser.add_argument(
+        "--energy-threshold",
+        type=float,
+        default=DEFAULT_ENERGY_THRESHOLD,
+        help=f"RMS energy gate threshold for noise rejection (default: {DEFAULT_ENERGY_THRESHOLD})",
     )
     parser.add_argument(
         "--device", type=int, default=None, help="Audio input device"
@@ -189,6 +196,7 @@ def _run_transcribe(args: argparse.Namespace) -> int:
         device=args.device,
         no_ui=args.no_ui,
         context=_resolve_context(args),
+        energy_threshold=args.energy_threshold,
     )
 
     asyncio.run(transcriber.run())
@@ -233,6 +241,7 @@ def _run_notes(args: argparse.Namespace) -> int:
         min_words=args.min_words,
         device=args.device,
         notes_config=notes_config,
+        energy_threshold=args.energy_threshold,
     )
     return 0
 

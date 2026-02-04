@@ -17,7 +17,8 @@ Voice-driven notes for Apple Silicon — speak, review, commit to markdown.
 │  │               │ │ file auto.   │ │
 │  └───────────────┘ └──────────────┘ │
 │                                     │
-│  ␣ Record/Stop  ⏎ Commit  q Quit   │
+│  ␣ Record/Stop  ⏎ Commit  ⎋ Discard│
+│  q Quit                            │
 └─────────────────────────────────────┘
 ```
 
@@ -105,9 +106,10 @@ uv run dictate notes --rewrite-model ollama/llama3.2 \
 | `--context-file` | — | File containing domain vocabulary |
 | `--transcribe-interval` | `0.5` | Seconds between ASR updates |
 | `--vad-frame-ms` | `30` | VAD frame size (10/20/30) |
-| `--vad-mode` | `2` | VAD aggressiveness (0-3) |
+| `--vad-mode` | `3` | VAD aggressiveness (0-3) |
 | `--vad-silence-ms` | `500` | Silence to finalize a turn (ms) |
 | `--min-words` | `3` | Minimum words to finalize a turn |
+| `--energy-threshold` | `300.0` | RMS energy gate for noise rejection |
 | `--device` | — | Audio input device index |
 | `--list-devices` | — | List audio input devices |
 
@@ -138,11 +140,14 @@ timestamped markdown files. Use `--notes-file` to write to a specific path inste
 |-----|--------|
 | `Space` | Start / stop recording |
 | `Enter` | Commit accumulated speech through LLM rewrite |
+| `Escape` | Discard accumulated text (with confirmation) |
 | `q` | Quit (saves uncommitted text raw to file) |
 
-The TUI starts stopped. Press Space to record, speak naturally, press Space to stop.
-Repeat to accumulate multiple turns. Press Enter when ready — the LLM rewrites your
-speech into clean markdown on the right panel and saves it to disk.
+The left panel header shows the current state — "Paused" or "● Listening" — so you
+always know whether audio is being captured. Press Space to record, speak naturally,
+press Space to stop. Repeat to accumulate multiple turns. Press Enter when ready —
+the LLM rewrites your speech into clean markdown on the right panel and saves it to
+disk. Press Escape to discard and start over.
 
 ## ASR Context Biasing
 
@@ -201,6 +206,8 @@ tail -f ~/.local/share/dictate/notes/*.md
 ## Troubleshooting
 
 - **Too many short turns**: increase `--vad-silence-ms` or lower `--vad-mode`
+- **Background noise triggering VAD**: increase `--energy-threshold` (default 300, try 500-800)
+- **Quiet speech being dropped**: lower `--energy-threshold` (try 100-200)
 - **No audio**: check mic permissions or try `--list-devices` + `--device`
 - **Laggy output**: reduce `--transcribe-interval`
 - **Notes rewrite failures**: check that your LLM backend is running (e.g., `ollama serve`). Raw transcripts are saved on rewrite failure.

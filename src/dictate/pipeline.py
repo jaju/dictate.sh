@@ -24,6 +24,7 @@ from dictate.audio.vad import VadConfig, VoiceActivityDetector
 from dictate.constants import (
     DEFAULT_ASR_MODEL,
     DEFAULT_AUDIO_QUEUE_MAXSIZE,
+    DEFAULT_ENERGY_THRESHOLD,
     DEFAULT_LANGUAGE,
     DEFAULT_LLM_MODEL,
     DEFAULT_MAX_BUFFER_SECONDS,
@@ -59,6 +60,7 @@ class RealtimeTranscriber:
         no_ui: bool = False,
         context: str | None = None,
         on_turn_complete: Callable[[str], Any] | None = None,
+        energy_threshold: float = DEFAULT_ENERGY_THRESHOLD,
     ) -> None:
         self.model_path = model_path
         self.language = language
@@ -70,6 +72,7 @@ class RealtimeTranscriber:
         self.llm_model_name = llm_model or DEFAULT_LLM_MODEL
         self.device = device
         self.no_ui = no_ui
+        self.energy_threshold = energy_threshold
         self.sample_rate = DEFAULT_SAMPLE_RATE
 
         self.audio_queue: asyncio.Queue[np.ndarray] = asyncio.Queue(
@@ -230,6 +233,11 @@ class RealtimeTranscriber:
                 pass
 
             if frame is not None:
+                # RMS energy gate — skip near-silent frames before VAD
+                rms = np.sqrt(np.mean(frame.astype(np.float32) ** 2))
+                if rms < self.energy_threshold:
+                    continue
+
                 async with self.buffer_lock:
                     self.ring_buffer.append(frame)
                     turn_complete = self.vad.process(frame)
