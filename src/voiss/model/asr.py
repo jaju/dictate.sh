@@ -10,9 +10,9 @@ import mlx.core as mx
 import mlx.nn as nn
 import numpy as np
 
-from dictate.config import ModelConfig
-from dictate.model.decoder import TextModel
-from dictate.model.encoder import AudioEncoder
+from voiss.config import ModelConfig
+from voiss.model.decoder import TextModel
+from voiss.model.encoder import AudioEncoder
 
 type Weights = dict[str, mx.array]
 

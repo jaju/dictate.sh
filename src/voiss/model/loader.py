@@ -7,9 +7,9 @@ from pathlib import Path
 import mlx.core as mx
 import mlx.nn as nn
 
-from dictate.config import make_model_config
-from dictate.model.asr import Qwen3ASRModel
-from dictate.protocols import FeatureExtractorLike, TokenizerLike
+from voiss.config import make_model_config
+from voiss.model.asr import Qwen3ASRModel
+from voiss.protocols import FeatureExtractorLike, TokenizerLike
 
 
 def load_qwen3_asr(

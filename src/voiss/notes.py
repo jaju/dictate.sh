@@ -9,9 +9,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from dictate.constants import DEFAULT_NOTES_DIR, DEFAULT_NOTES_DIR_ENV
-from dictate.env import LOGGER
-from dictate.rewrite import RewriteConfig, RewriteResult
+from voiss.constants import DEFAULT_NOTES_DIR, DEFAULT_NOTES_DIR_ENV
+from voiss.env import LOGGER
+from voiss.rewrite import RewriteConfig, RewriteResult
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,7 +27,7 @@ def resolve_notes_path(notes_file: str | None) -> Path:
 
     Priority:
     1. ``--notes-file`` flag (absolute or relative to cwd)
-    2. ``DICTATE_NOTES_DIR`` env var / default dir, with timestamp filename
+    2. ``VOISS_NOTES_DIR`` env var / default dir, with timestamp filename
     """
     if notes_file:
         return Path(notes_file).resolve()
@@ -59,6 +59,13 @@ def write_session_header(path: Path) -> None:
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
     with open(path, "w") as f:
         f.write(f"# Notes — {timestamp}\n\n")
+
+
+def append_raw(path: Path, text: str) -> None:
+    """Append raw text to the notes file (no LLM rewrite)."""
+    with open(path, "a") as f:
+        f.write(f"{text}\n\n")
+        f.flush()
 
 
 def append_turn(path: Path, result: RewriteResult) -> None:
@@ -98,9 +105,9 @@ def run_notes_pipeline(
     import numpy as np
     from rich.console import Console
 
-    from dictate.env import suppress_output
-    from dictate.model import load_qwen3_asr
-    from dictate.transcribe import build_logit_bias, transcribe
+    from voiss.env import suppress_output
+    from voiss.model import load_qwen3_asr
+    from voiss.transcribe import build_logit_bias, transcribe
 
     console = Console(stderr=True)
 
@@ -128,9 +135,9 @@ def run_notes_pipeline(
     console.print("[green]Ready.[/green]")
 
     # Phase 3: Launch Textual (owns terminal from here)
-    from dictate.notes_app import DictateNotesApp
+    from voiss.notes_app import VoissNotesApp
 
-    app = DictateNotesApp(
+    app = VoissNotesApp(
         model=model,
         tokenizer=tokenizer,
         feature_extractor=feature_extractor,

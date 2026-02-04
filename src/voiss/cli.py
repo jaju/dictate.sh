@@ -1,4 +1,4 @@
-"""CLI entry point for dictate.
+"""CLI entry point for voiss.
 
 Parses arguments, configures logging, and launches the appropriate pipeline.
 setup_environment() is called before importing pipeline to ensure MLX
@@ -13,7 +13,7 @@ import argparse
 import logging
 import os
 
-from dictate.constants import (
+from voiss.constants import (
     DEFAULT_ASR_MODEL,
     DEFAULT_ENERGY_THRESHOLD,
     DEFAULT_LANGUAGE,
@@ -101,7 +101,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         description="Real-time speech-to-text and voice-driven notes with Qwen3-ASR"
     )
 
-    # Shared STT args on top-level parser (for bare `dictate` usage)
+    # Shared STT args on top-level parser (for bare `voiss` usage)
     _add_shared_stt_args(parser)
 
     # Transcribe-only args on top-level parser
@@ -120,7 +120,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     # Subcommands
     subparsers = parser.add_subparsers(dest="subcommand")
 
-    # `dictate notes`
+    # `voiss notes`
     notes_parser = subparsers.add_parser(
         "notes",
         help="Notes mode: transcribe, rewrite via LLM, save to markdown",
@@ -150,7 +150,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     notes_parser.add_argument(
         "--config-file",
         default=None,
-        help="JSON config file (default: ~/.config/dictate/config.json)",
+        help="JSON config file (default: ~/.config/voiss/config.json)",
     )
 
     return parser
@@ -203,18 +203,18 @@ def _run_transcribe(args: argparse.Namespace) -> int:
     """Run the original transcription pipeline."""
     import asyncio
 
-    from dictate.pipeline import RealtimeTranscriber
-    from dictate.rewrite import load_config
+    from voiss.pipeline import RealtimeTranscriber
+    from voiss.rewrite import load_config
 
-    dictate_config = load_config()
+    voiss_config = load_config()
     cli_context = _resolve_context(args)
-    context = _merge_context(cli_context, dictate_config.context_terms)
+    context = _merge_context(cli_context, voiss_config.context_terms)
 
     # Logit bias: merge config bias terms with CLI context terms
-    bias_terms = list(dictate_config.bias_terms)
+    bias_terms = list(voiss_config.bias_terms)
     if cli_context:
         bias_terms.extend(t.strip() for t in cli_context.split(",") if t.strip())
-    bias_scale = args.context_bias if args.context_bias is not None else dictate_config.bias_scale
+    bias_scale = args.context_bias if args.context_bias is not None else voiss_config.bias_scale
 
     transcriber = RealtimeTranscriber(
         model_path=args.model,
@@ -240,26 +240,26 @@ def _run_transcribe(args: argparse.Namespace) -> int:
 
 def _run_notes(args: argparse.Namespace) -> int:
     """Run the notes pipeline (Textual TUI)."""
-    from dictate.constants import DEFAULT_REWRITE_SYSTEM_PROMPT
-    from dictate.notes import (
+    from voiss.constants import DEFAULT_REWRITE_SYSTEM_PROMPT
+    from voiss.notes import (
         NotesConfig,
         load_system_prompt,
         resolve_notes_path,
         run_notes_pipeline,
     )
-    from dictate.rewrite import RewriteConfig, load_config
+    from voiss.rewrite import RewriteConfig, load_config
 
     system_prompt = load_system_prompt(
         args.system_prompt,
         args.system_prompt_file,
     )
 
-    dictate_config = load_config(args.config_file)
+    voiss_config = load_config(args.config_file)
 
     rewrite_config = RewriteConfig(
         model=args.rewrite_model,
         system_prompt=system_prompt or DEFAULT_REWRITE_SYSTEM_PROMPT,
-        vocab=dictate_config.replacements,
+        vocab=voiss_config.replacements,
     )
     notes_config = NotesConfig(
         rewrite=rewrite_config,
@@ -267,13 +267,13 @@ def _run_notes(args: argparse.Namespace) -> int:
     )
 
     cli_context = _resolve_context(args)
-    context = _merge_context(cli_context, dictate_config.context_terms)
+    context = _merge_context(cli_context, voiss_config.context_terms)
 
     # Logit bias: merge config bias terms with CLI context terms
-    bias_terms = list(dictate_config.bias_terms)
+    bias_terms = list(voiss_config.bias_terms)
     if cli_context:
         bias_terms.extend(t.strip() for t in cli_context.split(",") if t.strip())
-    bias_scale = args.context_bias if args.context_bias is not None else dictate_config.bias_scale
+    bias_scale = args.context_bias if args.context_bias is not None else voiss_config.bias_scale
 
     run_notes_pipeline(
         model_path=args.model,
@@ -296,7 +296,7 @@ def _run_notes(args: argparse.Namespace) -> int:
 def main() -> int:
     """CLI entry point. Returns exit code."""
     # Must run before any MLX imports.
-    from dictate.env import setup_environment
+    from voiss.env import setup_environment
 
     setup_environment()
 

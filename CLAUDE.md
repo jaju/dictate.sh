@@ -2,16 +2,16 @@
 
 ## Project
 
-**dictate.sh** — Real-time speech-to-text and voice-driven notes for Apple Silicon using MLX.
-Packaged as `src/dictate/` with subcommands: bare `dictate` for live transcription, `dictate notes` for LLM-rewritten markdown notes.
+**voissistant** — Real-time speech-to-text and voice-driven notes for Apple Silicon using MLX.
+Packaged as `src/voiss/` with subcommands: bare `voiss` for live transcription, `voiss notes` for LLM-rewritten markdown notes.
 
 ## Quick Start
 
 - Python 3.12+, `uv` for all commands (`uv sync`, `uv run`, `uv pip`)
 - Apple Silicon Mac required (MLX framework)
 - **Virtual env**: Use `.venv/bin/python` for running Python directly (NOT `uv run python`)
-- Run: `uv run dictate` (transcription), `uv run dictate notes --rewrite-model ollama/llama3.2` (notes)
-- Sanity checks: `.venv/bin/python -c "from dictate.xxx import ..."` to validate modules
+- Run: `uv run voiss` (transcription), `uv run voiss notes --rewrite-model ollama/llama3.2` (notes)
+- Sanity checks: `.venv/bin/python -c "from voiss.xxx import ..."` to validate modules
 
 ## Work Protocol
 
@@ -50,12 +50,12 @@ See `ARCHITECTURE.md` for full technical details.
 - **Functional over OO**: Pure functions where state is not needed. Module-level functions over methods.
 - **Immutable over mutable**: `tuple` over `list` for fixed collections. Factory functions over `__post_init__` mutation.
 - **Dependencies**: mlx>=0.30.0, mlx-lm>=0.30.0, numpy>=2.0, rich>=14.0, webrtcvad-wheels>=2.0.14, litellm>=1.40, textual>=1.0
-- **Root `stt.py`**: Thin shim that imports from `dictate.cli`. No longer the full script.
+- **Root `stt.py`**: Thin shim that imports from `voiss.cli`. No longer the full script.
 
 ## File Layout (Target)
 
 ```
-src/dictate/
+src/voiss/
   __init__.py          — version only, no eager MLX imports
   constants.py         — Final-annotated defaults
   env.py               — setup_environment(), suppress_output(), LOGGER

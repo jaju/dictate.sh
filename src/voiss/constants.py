@@ -1,4 +1,4 @@
-"""Default configuration values for dictate."""
+"""Default configuration values for voiss."""
 
 from typing import Final
 
@@ -16,15 +16,16 @@ DEFAULT_AUDIO_QUEUE_MAXSIZE: Final = 200
 DEFAULT_ENERGY_THRESHOLD: Final = 300.0
 
 # Notes pipeline
-DEFAULT_NOTES_DIR: Final = "~/.local/share/dictate/notes"
-DEFAULT_NOTES_DIR_ENV: Final = "DICTATE_NOTES_DIR"
+DEFAULT_NOTES_DIR: Final = "~/.local/share/voiss/notes"
+DEFAULT_NOTES_DIR_ENV: Final = "VOISS_NOTES_DIR"
 DEFAULT_REWRITE_MAX_TOKENS: Final = 2048
 DEFAULT_REWRITE_SYSTEM_PROMPT: Final = (
     "Clean up the following speech transcript. Fix grammar, punctuation, and "
     "filler words. Keep the original meaning and wording intact — do not add "
-    "commentary, interpretation, or new information. Format as markdown. "
-    "Reply with only the cleaned text, nothing else."
+    "commentary, interpretation, or new information. If the text contains a "
+    "list of items or enumerated points, format them as a markdown list. "
+    "Format as markdown. Reply with only the cleaned text, nothing else."
 )
-DEFAULT_CONFIG_DIR: Final = "~/.config/dictate"
+DEFAULT_CONFIG_DIR: Final = "~/.config/voiss"
 DEFAULT_CONFIG_FILE: Final = "config.json"
 DEFAULT_CONTEXT_BIAS: Final = 5.0

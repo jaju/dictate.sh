@@ -1,4 +1,4 @@
-"""Environment setup, output suppression, and logging for dictate.
+"""Environment setup, output suppression, and logging for voiss.
 
 setup_environment() must be called before importing MLX or transformers
 to suppress noisy warnings and progress bars in a real-time CLI context.

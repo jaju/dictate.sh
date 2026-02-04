@@ -1,31 +1,32 @@
-# dictate.sh
+# voissistant
 
 Voice-driven notes for Apple Silicon — speak, review, commit to markdown.
 
 ```
-┌─────────── Dictate Notes ───────────┐
+┌─────────── Voiss Notes ────────────┐
 │                                     │
 │  ┌─ Speech ──────┐ ┌─ Notes ──────┐ │
 │  │               │ │              │ │
-│  │ You speak     │ │ LLM-cleaned  │ │
+│  │ You speak     │ │ Rendered     │ │
 │  │ here. VAD     │ │ markdown     │ │
 │  │ detects turn  │ │ appears here │ │
 │  │ boundaries.   │ │ after you    │ │
-│  │               │ │ press Enter. │ │
+│  │               │ │ commit.      │ │
 │  │ Tab/click to  │ │              │ │
 │  │ focus, then   │ │ Tab/click to │ │
 │  │ e to edit.    │ │ focus, then  │ │
 │  │ (in-memory)   │ │ e to edit.   │ │
 │  └───────────────┘ └──────────────┘ │
 │                                     │
-│  ␣ Rec  e Edit  ⏎ Commit  ⎋ Discard│
-│  q Quit                             │
+│  ␣ Rec  e Edit  ⏎ Raw  r Rewrite  │
+│  ⎋ Discard  q Quit                 │
 └─────────────────────────────────────┘
 ```
 
 Press **Space** to record. Speak naturally — VAD detects when you pause.
-Press **Enter** to send accumulated speech through an LLM for cleanup.
-Clean markdown appears in the right panel and is saved to disk.
+Press **Enter** to commit accumulated speech raw (with vocab corrections).
+Press **r** to send through an LLM for cleanup before committing.
+Clean markdown is rendered in the right panel and saved to disk.
 
 Both panels support modal editing. Panels have three visual states: **blue**
 (default), **orange** (selected via Tab/click — no cursor, no interaction),
@@ -40,18 +41,20 @@ All processing runs locally on your Mac's GPU via MLX. No cloud required
 (unless you choose a cloud LLM for rewriting).
 
 ```bash
-uv run dictate notes --rewrite-model ollama/llama3.2
+uv run voiss notes --rewrite-model ollama/llama3.2
 ```
 
 ## Features
 
 - **Full-screen notes TUI** — two-panel Textual interface with push-to-record workflow and modal editing
+- **Dual commit modes** — Enter for raw commit (fast), `r` for LLM-rewritten commit
+- **Rendered markdown** — right panel displays notes as rendered markdown (switches to TextArea for editing)
 - Local, streaming ASR on Apple Silicon (MLX, Qwen3-ASR)
 - Voice activity detection (VAD) for automatic turn boundaries
-- **LLM rewriting** — each commit cleaned up via any [litellm](https://docs.litellm.ai/docs/providers)-compatible model
+- **LLM rewriting** — each `r` commit cleaned up via any [litellm](https://docs.litellm.ai/docs/providers)-compatible model
 - **ASR context biasing** — supply domain vocabulary to improve transcription accuracy
 - Configurable system prompts for domain-specific output (SOAP notes, meeting minutes, etc.)
-- Also works as a **live transcription** pipe (`uv run dictate`)
+- Also works as a **live transcription** pipe (`uv run voiss`)
 - Fully offline after models are downloaded (with local LLM backends)
 
 ## Requirements
@@ -67,40 +70,40 @@ uv run dictate notes --rewrite-model ollama/llama3.2
 Notes mode (the main event):
 
 ```bash
-uv run dictate notes --rewrite-model ollama/llama3.2
+uv run voiss notes --rewrite-model ollama/llama3.2
 ```
 
 Live transcription (simpler, no TUI):
 
 ```bash
-uv run dictate
+uv run voiss
 ```
 
 With domain vocabulary for better transcription accuracy:
 
 ```bash
-uv run dictate notes --rewrite-model ollama/llama3.2 \
+uv run voiss notes --rewrite-model ollama/llama3.2 \
     --context "Kubernetes, kubectl, etcd, CoreDNS, Istio"
 ```
 
 With a custom system prompt for the rewriter:
 
 ```bash
-uv run dictate notes --rewrite-model ollama/llama3.2 \
+uv run voiss notes --rewrite-model ollama/llama3.2 \
     --system-prompt "You are a medical scribe. Format as SOAP notes."
 ```
 
 Or load the system prompt from a file:
 
 ```bash
-uv run dictate notes --rewrite-model ollama/llama3.2 \
+uv run voiss notes --rewrite-model ollama/llama3.2 \
     --system-prompt-file ~/prompts/meeting-notes.txt
 ```
 
 Save notes to a specific file:
 
 ```bash
-uv run dictate notes --rewrite-model ollama/llama3.2 \
+uv run voiss notes --rewrite-model ollama/llama3.2 \
     --notes-file ./meeting-2026-02-04.md
 ```
 
@@ -124,7 +127,7 @@ uv run dictate notes --rewrite-model ollama/llama3.2 \
 | `--device` | — | Audio input device index |
 | `--list-devices` | — | List audio input devices |
 
-### Transcription Mode (`dictate`)
+### Transcription Mode (`voiss`)
 
 | Option | Description |
 |--------|-------------|
@@ -132,7 +135,7 @@ uv run dictate notes --rewrite-model ollama/llama3.2 \
 | `--llm-model` | LLM for intent analysis (default: `mlx-community/Qwen3-0.6B-4bit`) |
 | `--no-ui` | Disable the Rich live UI |
 
-### Notes Mode (`dictate notes`)
+### Notes Mode (`voiss notes`)
 
 | Option | Description |
 |--------|-------------|
@@ -140,9 +143,9 @@ uv run dictate notes --rewrite-model ollama/llama3.2 \
 | `--system-prompt` | System prompt to guide rewriting style |
 | `--system-prompt-file` | Path to file containing the system prompt |
 | `--notes-file` | Output file path (default: auto-named in notes directory) |
-| `--config-file` | JSON config file for context, replacements, and bias (default: `~/.config/dictate/config.json`) |
+| `--config-file` | JSON config file for context, replacements, and bias (default: `~/.config/voiss/config.json`) |
 
-Notes are saved to `$DICTATE_NOTES_DIR` (default: `~/.local/share/dictate/notes/`) as
+Notes are saved to `$VOISS_NOTES_DIR` (default: `~/.local/share/voiss/notes/`) as
 timestamped markdown files. Use `--notes-file` to write to a specific path instead.
 
 ### Notes Mode Key Bindings
@@ -150,7 +153,8 @@ timestamped markdown files. Use `--notes-file` to write to a specific path inste
 | Key | Action |
 |-----|--------|
 | `Space` | Start / stop recording |
-| `Enter` | Commit accumulated speech through LLM rewrite |
+| `Enter` | Commit accumulated speech raw (with vocab corrections, no LLM) |
+| `r` | Commit with LLM rewrite |
 | `e` | Enter edit mode on focused panel |
 | `Escape` | Cancel edit (in edit mode) / Discard accumulated text (normal mode) |
 | `Ctrl+S` | Save edit and exit edit mode |
@@ -158,7 +162,8 @@ timestamped markdown files. Use `--notes-file` to write to a specific path inste
 
 **Normal mode:** All keys above trigger their actions. Tab or click to focus a panel
 (accent border appears). The left panel header shows "Paused" or "● Listening" so
-you always know whether audio is being captured.
+you always know whether audio is being captured. The right panel displays rendered
+markdown; it switches to a TextArea editor when you press `e`.
 
 **Edit mode:** Press `e` on a focused panel to start editing. Space, Enter, q, and
 e all type normally into the editor. Press `Ctrl+S` to save or `Escape` to cancel
@@ -166,8 +171,8 @@ and revert changes. Left panel edits update the in-memory accumulator; right pan
 edits write to the notes file.
 
 Press Space to record, speak naturally, press Space to stop. Repeat to accumulate
-multiple turns. Press Enter when ready — the LLM rewrites your speech into clean
-markdown on the right panel and saves it to disk. Press Escape to discard and start
+multiple turns. Press Enter for a quick raw commit, or `r` when you want the
+LLM to clean up your speech into polished markdown. Press Escape to discard and start
 over.
 
 ## Domain Vocabulary and Context Biasing
@@ -177,7 +182,7 @@ Qwen3-ASR has a **native context biasing capability trained during supervised fi
 prompt during decoding. This is the primary mechanism for improving transcription accuracy
 on domain-specific terms, and it works well out of the box.
 
-dictate builds on this with two additional layers for cases where native biasing isn't
+voiss builds on this with two additional layers for cases where native biasing isn't
 enough:
 
 1. **Prompt context biasing (native SFT)** — domain terms are injected into the Qwen3-ASR
@@ -197,18 +202,18 @@ enough:
 
 ```bash
 # Inline domain vocabulary — feeds native SFT context biasing
-uv run dictate --context "Kubernetes, kubectl, etcd, CoreDNS"
+uv run voiss --context "Kubernetes, kubectl, etcd, CoreDNS"
 
 # With supplementary logit biasing (default scale: 5.0)
-uv run dictate --context "Kubernetes, kubectl, etcd" --context-bias 4.0
+uv run voiss --context "Kubernetes, kubectl, etcd" --context-bias 4.0
 
 # From a file (one term per line, or freeform text)
-uv run dictate --context-file ~/vocab/medical-terms.txt
+uv run voiss --context-file ~/vocab/medical-terms.txt
 ```
 
 ### Via Configuration File
 
-dictate loads configuration from `~/.config/dictate/config.json`. All sections are
+voiss loads configuration from `~/.config/voiss/config.json`. All sections are
 optional. A sample config for clinical notes is provided in
 [`examples/config.json`](examples/config.json).
 
@@ -270,11 +275,11 @@ Any model supported by [litellm](https://docs.litellm.ai/docs/providers) works.
 
 ```bash
 # Pipe raw transcripts to another tool
-uv run dictate | grep "important"
+uv run voiss | grep "important"
 
 # Watch notes being written in real-time
-uv run dictate notes --rewrite-model ollama/llama3.2 &
-tail -f ~/.local/share/dictate/notes/*.md
+uv run voiss notes --rewrite-model ollama/llama3.2 &
+tail -f ~/.local/share/voiss/notes/*.md
 ```
 
 ## Troubleshooting

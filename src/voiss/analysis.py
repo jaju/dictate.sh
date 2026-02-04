@@ -8,8 +8,8 @@ import re
 from dataclasses import dataclass
 from typing import Any, Final
 
-from dictate.env import suppress_output
-from dictate.protocols import TokenizerLike
+from voiss.env import suppress_output
+from voiss.protocols import TokenizerLike
 
 INTENT_EXPLAIN_PROMPT: Final = """Analyze this speech and respond with exactly 3 lines:
 INTENT: <primary intent in 2-3 words>

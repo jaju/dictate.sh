@@ -2,7 +2,7 @@
 
 ## Overview
 
-dictate.sh is a real-time speech-to-text tool and voice-driven notes system for Apple Silicon Macs. It captures microphone audio, detects speech boundaries via VAD, transcribes using a local ASR model (Qwen3-ASR) running on MLX, and supports two modes: live transcription (with optional intent analysis) and notes mode (LLM-rewritten markdown notes via litellm).
+voissistant is a real-time speech-to-text tool and voice-driven notes system for Apple Silicon Macs. It captures microphone audio, detects speech boundaries via VAD, transcribes using a local ASR model (Qwen3-ASR) running on MLX, and supports two modes: live transcription (with optional intent analysis) and notes mode (LLM-rewritten markdown notes via litellm).
 
 ## Technology Stack
 
@@ -120,11 +120,11 @@ transcribe         (mlx, numpy, mlx_lm, model, protocols)
 audio/ring_buffer  (numpy)
 audio/vad          (numpy, webrtcvad)
 analysis           (re, mlx_lm, env, protocols)
-rewrite            (litellm, json, pathlib, constants)  — also DictateConfig + load_config()
+rewrite            (litellm, json, pathlib, constants)  — also VoissConfig + load_config()
 notes              (pathlib, numpy, rich, constants, env, model, transcribe, notes_app)
 notes_app          (textual, rich, asyncio, numpy, sounddevice, notes, rewrite, transcribe, audio)
 ui                 (rich, analysis)
-pipeline           (asyncio, numpy, sounddevice, rich, all dictate modules)
+pipeline           (asyncio, numpy, sounddevice, rich, all voiss modules)
 cli                (argparse, constants, env, pipeline, notes, rewrite)
 ```
 
@@ -132,7 +132,7 @@ No circular dependencies. Strictly bottom-up.
 
 ## Notes Pipeline
 
-The notes mode (`dictate notes`) uses a four-layer pipeline for domain-accurate structured notes:
+The notes mode (`voiss notes`) uses a four-layer pipeline for domain-accurate structured notes:
 
 ```
 Layer 1: ASR Context Biasing — native SFT (primary)
@@ -167,16 +167,18 @@ Layer 4: LLM Rewriting
 Notes mode uses a Textual full-screen TUI with manual commit workflow:
 
 - **Left panel** (40%): debounced, vocab-corrected transcript. VAD turns accumulate here across silence boundaries.
-- **Right panel** (60%): scrollable RichLog showing rewritten markdown, separated by rules.
+- **Right panel** (60%): Markdown widget showing rendered notes in display mode, TextArea for editing. CSS toggles visibility based on `-editing` class.
 - **Footer**: live pipeline state (VAD, buffer, ASR latency, turn count) + key bindings.
 
-**Key bindings**: Space starts/stops recording (push-to-record), Enter commits accumulated text through LLM rewrite, q quits (saving uncommitted text raw).
+**Key bindings**: Space starts/stops recording (push-to-record), Enter commits raw (with vocab corrections), `r` commits with LLM rewrite, q quits (saving uncommitted text raw).
 
-**VAD + manual commit coexistence**: `_handle_turn_complete()` still fires on VAD silence (required for ASR buffer management), but the `on_turn_complete` callback only appends to an accumulator list — it does not auto-trigger rewrite. The user presses Enter when ready to commit.
+**Dual commit modes**: Enter appends vocab-corrected text directly to the notes file (fast, no LLM). `r` runs the text through the configured LLM for cleanup before appending. Both modes clear the left panel, reset audio state, and reload the right panel.
+
+**VAD + manual commit coexistence**: `_handle_turn_complete()` still fires on VAD silence (required for ASR buffer management), but the `on_turn_complete` callback only appends to an accumulator list — it does not auto-trigger rewrite. The user presses Enter or `r` when ready to commit.
 
 **Architecture**: The Textual app does NOT use `RealtimeTranscriber`. Instead, `notes.run_notes_pipeline()` loads the ASR model and runs warmup *before* Textual starts (subprocess-safe, fd-safe). Then Textual owns the terminal and event loop. The app directly manages `RingBuffer`, `VoiceActivityDetector`, `sd.InputStream`, and an `asyncio.Queue` — with a `_processor()` task running on Textual's own event loop. ASR inference uses Python-level `redirect_stdout`/`redirect_stderr` only (no `os.dup2`) to avoid fd conflicts with Textual's terminal rendering. Rewrite runs in a separate `@work(thread=True)` worker via `rewrite_transcript()`.
 
-Output files are saved to `$DICTATE_NOTES_DIR` (default `~/.local/share/dictate/notes/`) as timestamped markdown, or to a path specified by `--notes-file`. On rewrite failure, the raw transcript is preserved.
+Output files are saved to `$VOISS_NOTES_DIR` (default `~/.local/share/voiss/notes/`) as timestamped markdown, or to a path specified by `--notes-file`. On rewrite failure, the raw transcript is preserved.
 
 ## Key Patterns
 

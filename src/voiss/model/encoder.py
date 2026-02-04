@@ -11,8 +11,8 @@ import mlx.core as mx
 import mlx.nn as nn
 import numpy as np
 
-from dictate.config import AudioEncoderConfig
-from dictate.model._utils import get_feat_extract_output_lengths
+from voiss.config import AudioEncoderConfig
+from voiss.model._utils import get_feat_extract_output_lengths
 
 
 # ---------------------------------------------------------------------------

@@ -8,8 +8,8 @@ from typing import Any, override
 import mlx.core as mx
 import mlx.nn as nn
 
-from dictate.config import TextConfig
-from dictate.model._utils import create_additive_causal_mask
+from voiss.config import TextConfig
+from voiss.model._utils import create_additive_causal_mask
 
 
 class TextAttention(nn.Module):

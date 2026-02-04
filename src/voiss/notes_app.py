@@ -24,20 +24,20 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.events import Click
 from textual.screen import ModalScreen
-from textual.widgets import Header, Static, TextArea
+from textual.widgets import Header, Markdown, Static, TextArea
 
-from dictate.audio.ring_buffer import RingBuffer
-from dictate.audio.vad import VadConfig, VoiceActivityDetector
-from dictate.constants import (
+from voiss.audio.ring_buffer import RingBuffer
+from voiss.audio.vad import VadConfig, VoiceActivityDetector
+from voiss.constants import (
     DEFAULT_AUDIO_QUEUE_MAXSIZE,
     DEFAULT_ENERGY_THRESHOLD,
     DEFAULT_MAX_BUFFER_SECONDS,
     DEFAULT_SAMPLE_RATE,
 )
-from dictate.notes import NotesConfig, append_turn, write_session_header
-from dictate.protocols import FeatureExtractorLike, TokenizerLike
-from dictate.rewrite import RewriteResult, apply_vocab, rewrite_transcript
-from dictate.transcribe import is_meaningful, transcribe
+from voiss.notes import NotesConfig, append_raw, append_turn, write_session_header
+from voiss.protocols import FeatureExtractorLike, TokenizerLike
+from voiss.rewrite import RewriteResult, apply_vocab, rewrite_transcript
+from voiss.transcribe import is_meaningful, transcribe
 
 # Maps selected panel name to (container id, editor id)
 _PANEL_IDS: dict[str, tuple[str, str]] = {
@@ -116,10 +116,10 @@ class QuitConfirmScreen(ModalScreen[bool]):
         self.dismiss(False)
 
 
-class DictateNotesApp(App):
+class VoissNotesApp(App):
     """Textual TUI for voice-driven notes with modal editable panels."""
 
-    TITLE = "Dictate Notes"
+    TITLE = "Voiss Notes"
 
     CSS = """
     #middle {
@@ -162,8 +162,18 @@ class DictateNotesApp(App):
         border-subtitle-color: $error;
     }
     #output-editor {
+        display: none;
         height: 1fr;
         border: none;
+    }
+    #output-display {
+        height: 1fr;
+    }
+    #right-container.-editing #output-editor {
+        display: block;
+    }
+    #right-container.-editing #output-display {
+        display: none;
     }
     #status-bar {
         height: 1;
@@ -176,6 +186,7 @@ class DictateNotesApp(App):
 
     BINDINGS = [
         Binding("enter", "commit", "Commit", priority=True),
+        Binding("r", "commit_rewrite", "Rewrite", priority=True),
         Binding("space", "toggle_recording", "Record/Stop", priority=True),
         Binding("e", "edit_panel", "Edit", priority=True),
         Binding("escape", "escape_action", "Esc", priority=True),
@@ -271,6 +282,7 @@ class DictateNotesApp(App):
                 yield Static(self._state_header(), id="speech-header")
                 yield TextArea("", id="speech-editor", read_only=True)
             with Vertical(id="right-container"):
+                yield Markdown("", id="output-display")
                 yield TextArea("", id="output-editor", read_only=True)
         yield Static("", id="status-bar")
 
@@ -278,14 +290,15 @@ class DictateNotesApp(App):
         # Disable focus on both TextAreas — no cursor, no arrow keys
         self.query_one("#speech-editor", TextArea).can_focus = False
         self.query_one("#output-editor", TextArea).can_focus = False
+        self.query_one("#output-display", Markdown).can_focus = False
 
         write_session_header(self._notes_config.output_path)
 
-        # Load notes file into right panel
-        output = self.query_one("#output-editor", TextArea)
+        # Load notes file into right panel (both widgets)
         try:
             content = self._notes_config.output_path.read_text()
-            output.text = content
+            self.query_one("#output-editor", TextArea).text = content
+            self.query_one("#output-display", Markdown).update(content)
         except FileNotFoundError:
             pass
 
@@ -496,7 +509,7 @@ class DictateNotesApp(App):
             parts.append("^S Save  \u238b Cancel")
         else:
             parts.append(
-                "\u2423 Rec  \u21e5 Select  e Edit  \u23ce Commit  \u238b Discard  q Quit"
+                "\u2423 Rec  \u21e5 Select  e Edit  \u23ce Raw  r Rewrite  \u238b Discard  q Quit"
             )
         bar.update(" ".join(parts))
 
@@ -561,6 +574,18 @@ class DictateNotesApp(App):
             self._notes_config.output_path.write_text(output.text)
             self._output_dirty = False
 
+    def _reload_right_panel(self) -> None:
+        """Reload file content into both right-panel widgets."""
+        try:
+            content = self._notes_config.output_path.read_text()
+            self.query_one("#output-editor", TextArea).text = content
+            md = self.query_one("#output-display", Markdown)
+            md.update(content)
+            md.scroll_end(animate=False)
+            self._output_dirty = False
+        except FileNotFoundError:
+            pass
+
     # ── Edit mode helpers ────────────────────────────────────────────
 
     def _exit_edit_mode(self) -> None:
@@ -581,6 +606,11 @@ class DictateNotesApp(App):
             container.add_class("-selected")
             container.border_title = ""
             container.border_subtitle = ""
+
+            # Sync TextArea back to Markdown on right panel exit
+            if self._editing_target == "output-editor":
+                md = self.query_one("#output-display", Markdown)
+                md.update(editor.text)
 
         self.set_focus(None)
         self._editing = False
@@ -615,6 +645,44 @@ class DictateNotesApp(App):
         self._current_partial = ""
         self._last_partial_raw = ""
         self._current_transcript = ""
+
+    # ── Commit helpers ───────────────────────────────────────────────
+
+    def _prepare_commit(self) -> str | None:
+        """Shared commit preparation: read left panel, clear state, reset audio.
+
+        Returns the combined text, or None if editing or nothing to commit.
+        """
+        if self._editing:
+            return None
+
+        combined = self._read_left_panel()
+        if not combined:
+            return None
+
+        # Sync and clear state
+        self._turn_accumulator.clear()
+        self._current_transcript = ""
+        self._current_partial = ""
+        self._last_partial_raw = ""
+        self._committing = True
+
+        # Clear left editor
+        editor = self.query_one("#speech-editor", TextArea)
+        editor.text = ""
+
+        # Reset audio state so stale buffer doesn't re-populate the panel
+        if self._ring_buffer:
+            self._ring_buffer.reset()
+            self._last_transcribed_sample = (
+                self._ring_buffer.total_samples_written
+            )
+        if self._vad:
+            self._vad.reset()
+        self._buffer_seconds = 0.0
+
+        self._update_status_bar()
+        return combined
 
     # ── Action handlers ──────────────────────────────────────────────
 
@@ -695,36 +763,36 @@ class DictateNotesApp(App):
         )
 
     def action_commit(self) -> None:
+        """Enter: commit raw text (with vocab corrections, no LLM rewrite)."""
         if self._editing:
             self._insert_into_editor("\n")
             return
 
-        combined = self._read_left_panel()
+        combined = self._prepare_commit()
         if not combined:
             return
 
-        # Sync and clear state
-        self._turn_accumulator.clear()
-        self._current_transcript = ""
-        self._current_partial = ""
-        self._last_partial_raw = ""
-        self._committing = True
+        # Apply vocab corrections (no LLM)
+        vocab = self._notes_config.rewrite.vocab
+        if vocab:
+            combined = apply_vocab(combined, vocab)
 
-        # Clear left editor
-        editor = self.query_one("#speech-editor", TextArea)
-        editor.text = ""
-
-        # Reset audio state so stale buffer doesn't re-populate the panel
-        if self._ring_buffer:
-            self._ring_buffer.reset()
-            self._last_transcribed_sample = (
-                self._ring_buffer.total_samples_written
-            )
-        if self._vad:
-            self._vad.reset()
-        self._buffer_seconds = 0.0
-
+        self._save_output_if_dirty()
+        append_raw(self._notes_config.output_path, combined)
+        self._reload_right_panel()
+        self._committing = False
         self._update_status_bar()
+
+    def action_commit_rewrite(self) -> None:
+        """r: commit with LLM rewrite."""
+        if self._editing:
+            self._insert_into_editor("r")
+            return
+
+        combined = self._prepare_commit()
+        if not combined:
+            return
+
         self._run_rewrite(combined)
 
     @work(exclusive=True, thread=True)
@@ -739,16 +807,7 @@ class DictateNotesApp(App):
         # Append structured turn to file
         append_turn(self._notes_config.output_path, result)
 
-        # Reload file content into right panel
-        output = self.query_one("#output-editor", TextArea)
-        try:
-            content = self._notes_config.output_path.read_text()
-            output.text = content
-            # Mark clean since we just loaded from file
-            self._output_dirty = False
-        except FileNotFoundError:
-            pass
-
+        self._reload_right_panel()
         self._committing = False
         self._update_status_bar()
 

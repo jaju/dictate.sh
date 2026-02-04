@@ -9,7 +9,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from dictate.constants import (
+from voiss.constants import (
     DEFAULT_CONFIG_DIR,
     DEFAULT_CONFIG_FILE,
     DEFAULT_CONTEXT_BIAS,
@@ -19,8 +19,8 @@ from dictate.constants import (
 
 
 @dataclass(frozen=True, slots=True)
-class DictateConfig:
-    """Top-level configuration loaded from ~/.config/dictate/config.json."""
+class VoissConfig:
+    """Top-level configuration loaded from ~/.config/voiss/config.json."""
 
     context_terms: tuple[str, ...] = ()
     replacements: dict[str, str] = field(default_factory=dict)
@@ -28,10 +28,10 @@ class DictateConfig:
     bias_scale: float = DEFAULT_CONTEXT_BIAS
 
 
-def load_config(path: str | None = None) -> DictateConfig:
-    """Load dictate configuration from a JSON file.
+def load_config(path: str | None = None) -> VoissConfig:
+    """Load voiss configuration from a JSON file.
 
-    Reads ``~/.config/dictate/config.json`` (or the path given).
+    Reads ``~/.config/voiss/config.json`` (or the path given).
     The config file supports three optional subtrees::
 
         {
@@ -53,7 +53,7 @@ def load_config(path: str | None = None) -> DictateConfig:
         with open(config_path) as f:
             data = json.load(f)
         if not isinstance(data, dict):
-            return DictateConfig()
+            return VoissConfig()
 
         # context — list of terms for ASR system prompt biasing
         context_terms: tuple[str, ...] = ()
@@ -77,14 +77,14 @@ def load_config(path: str | None = None) -> DictateConfig:
             if isinstance(raw_scale, (int, float)):
                 bias_scale = float(raw_scale)
 
-        return DictateConfig(
+        return VoissConfig(
             context_terms=context_terms,
             replacements=replacements,
             bias_terms=bias_terms,
             bias_scale=bias_scale,
         )
 
-    return DictateConfig()
+    return VoissConfig()
 
 
 @dataclass(frozen=True, slots=True)

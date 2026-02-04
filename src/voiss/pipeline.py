@@ -18,10 +18,10 @@ import sounddevice as sd
 from rich.console import Console
 from rich.live import Live
 
-from dictate.analysis import IntentResult, analyze_intent
-from dictate.audio.ring_buffer import RingBuffer
-from dictate.audio.vad import VadConfig, VoiceActivityDetector
-from dictate.constants import (
+from voiss.analysis import IntentResult, analyze_intent
+from voiss.audio.ring_buffer import RingBuffer
+from voiss.audio.vad import VadConfig, VoiceActivityDetector
+from voiss.constants import (
     DEFAULT_ASR_MODEL,
     DEFAULT_AUDIO_QUEUE_MAXSIZE,
     DEFAULT_ENERGY_THRESHOLD,
@@ -35,11 +35,11 @@ from dictate.constants import (
     DEFAULT_VAD_MODE,
     DEFAULT_VAD_SILENCE_MS,
 )
-from dictate.env import LOGGER, suppress_output
-from dictate.model import load_qwen3_asr
-from dictate.protocols import FeatureExtractorLike, TokenizerLike
-from dictate.transcribe import build_logit_bias, is_meaningful, transcribe
-from dictate.ui import UiState, render_layout
+from voiss.env import LOGGER, suppress_output
+from voiss.model import load_qwen3_asr
+from voiss.protocols import FeatureExtractorLike, TokenizerLike
+from voiss.transcribe import build_logit_bias, is_meaningful, transcribe
+from voiss.ui import UiState, render_layout
 
 
 class RealtimeTranscriber:
