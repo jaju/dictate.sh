@@ -62,6 +62,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=DEFAULT_MIN_WORDS,
         help=f"Minimum words to finalize a turn (default: {DEFAULT_MIN_WORDS})",
     )
+    context_group = parser.add_mutually_exclusive_group()
+    context_group.add_argument(
+        "--context",
+        default=None,
+        help="Domain vocabulary for ASR context biasing (inline string)",
+    )
+    context_group.add_argument(
+        "--context-file",
+        default=None,
+        help="File containing domain vocabulary for ASR context biasing",
+    )
     parser.add_argument(
         "--analyze",
         action="store_true",
@@ -139,7 +150,13 @@ def main() -> int:
         list_audio_devices()
         return 0
 
+    from pathlib import Path
+
     from dictate.pipeline import RealtimeTranscriber
+
+    context = args.context
+    if args.context_file:
+        context = Path(args.context_file).read_text().strip()
 
     transcriber = RealtimeTranscriber(
         model_path=args.model,
@@ -153,6 +170,7 @@ def main() -> int:
         llm_model=args.llm_model,
         device=args.device,
         no_ui=args.no_ui,
+        context=context,
     )
 
     asyncio.run(transcriber.run())

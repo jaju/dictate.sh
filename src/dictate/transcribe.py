@@ -21,11 +21,15 @@ def transcribe(
     audio: np.ndarray,
     language: str = "English",
     max_tokens: int = 8192,
+    context: str | None = None,
 ) -> Generator[str, None, None]:
     """Stream transcription tokens from audio input.
 
     Encodes audio features, replaces audio pad tokens in the prompt
     with encoder outputs, then generates text tokens autoregressively.
+
+    When *context* is provided, it is injected into the Qwen3-ASR system
+    prompt to bias the decoder toward domain-specific vocabulary.
     """
     from mlx_lm.generate import generate_step
 
@@ -51,8 +55,9 @@ def transcribe(
     supported_lower = {lang.lower(): lang for lang in supported}
     lang_name = supported_lower.get(language.lower(), language)
 
+    system_content = context or ""
     prompt = (
-        f"<|im_start|>system\n<|im_end|>\n"
+        f"<|im_start|>system\n{system_content}<|im_end|>\n"
         f"<|im_start|>user\n<|audio_start|>"
         f"{'<|audio_pad|>' * num_audio_tokens}"
         f"<|audio_end|><|im_end|>\n"

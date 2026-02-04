@@ -64,10 +64,12 @@ class RealtimeTranscriber:
         llm_model: str | None = None,
         device: int | None = None,
         no_ui: bool = False,
+        context: str | None = None,
     ) -> None:
         self.model_path = model_path
         self.language = language
         self.transcribe_interval = transcribe_interval
+        self.context = context
         self.min_words = min_words
         self.analyze = analyze
         self.llm_model_name = llm_model or DEFAULT_LLM_MODEL
@@ -162,6 +164,7 @@ class RealtimeTranscriber:
                 self.feature_extractor,
                 audio,
                 self.language,
+                context=self.context,
             ):
                 parts.append(token)
         return "".join(parts).strip()
@@ -386,6 +389,7 @@ class RealtimeTranscriber:
                         self.feature_extractor,
                         dummy_audio,
                         self.language,
+                        context=self.context,
                     )
                 )
             finally:
