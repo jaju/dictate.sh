@@ -411,17 +411,22 @@ class DictateNotesApp(App):
         if self._recording:
             self._stream.stop()
             self._recording = False
+            self.notify("Stopped", severity="warning", timeout=2)
         else:
             # Reset buffer/VAD so stale audio doesn't bleed into new recording
             if self._ring_buffer:
                 self._ring_buffer.reset()
+                # Sync: total_samples_written is NOT cleared by reset()
+                self._last_transcribed_sample = (
+                    self._ring_buffer.total_samples_written
+                )
             if self._vad:
                 self._vad.reset()
-            self._last_transcribed_sample = 0
             self._current_transcript = ""
             self._buffer_seconds = 0.0
             self._stream.start()
             self._recording = True
+            self.notify("Recording", severity="information", timeout=2)
         self._update_status_bar()
 
     def action_quit_app(self) -> None:
