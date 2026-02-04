@@ -55,10 +55,14 @@ def load_system_prompt(
 
 
 def write_session_header(path: Path) -> None:
-    """Write the markdown session header to a new file."""
+    """Write a session header. Creates the file if new, appends a separator if existing."""
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-    with open(path, "w") as f:
-        f.write(f"# Notes — {timestamp}\n\n")
+    if path.exists() and path.stat().st_size > 0:
+        with open(path, "a") as f:
+            f.write(f"\n---\n\n# Session — {timestamp}\n\n")
+    else:
+        with open(path, "w") as f:
+            f.write(f"# Notes — {timestamp}\n\n")
 
 
 def append_raw(path: Path, text: str) -> None:
