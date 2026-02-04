@@ -12,6 +12,7 @@ import shutil
 import signal
 import sys
 import time
+from collections.abc import Callable
 from typing import Any
 
 import numpy as np
@@ -65,11 +66,13 @@ class RealtimeTranscriber:
         device: int | None = None,
         no_ui: bool = False,
         context: str | None = None,
+        on_turn_complete: Callable[[str], Any] | None = None,
     ) -> None:
         self.model_path = model_path
         self.language = language
         self.transcribe_interval = transcribe_interval
         self.context = context
+        self.on_turn_complete = on_turn_complete
         self.min_words = min_words
         self.analyze = analyze
         self.llm_model_name = llm_model or DEFAULT_LLM_MODEL
@@ -201,6 +204,10 @@ class RealtimeTranscriber:
                 ) * 1000
 
         self.pending_analysis = (final_transcript, analysis_result)
+
+        if self.on_turn_complete is not None:
+            await self.on_turn_complete(final_transcript)
+
         self.last_transcript = final_transcript
         self.current_transcript = ""
         self.ui_state.status = "Listening"
