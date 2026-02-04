@@ -2,7 +2,7 @@
 
 ## Overview
 
-dictate.sh is a real-time speech-to-text transcription tool for Apple Silicon Macs. It captures microphone audio, detects speech boundaries via VAD, transcribes using a local ASR model (Qwen3-ASR) running on MLX, and optionally analyzes intent with a small local LLM.
+dictate.sh is a real-time speech-to-text tool and voice-driven notes system for Apple Silicon Macs. It captures microphone audio, detects speech boundaries via VAD, transcribes using a local ASR model (Qwen3-ASR) running on MLX, and supports two modes: live transcription (with optional intent analysis) and notes mode (LLM-rewritten markdown notes via litellm).
 
 ## Technology Stack
 
@@ -15,6 +15,7 @@ dictate.sh is a real-time speech-to-text transcription tool for Apple Silicon Ma
 | VAD | webrtcvad-wheels | >=2.0.14 | Voice activity detection |
 | Feature Extraction | transformers (Whisper) | >=4.47 | Mel-spectrogram (128 bins) |
 | Model Hub | huggingface-hub | >=0.27 | Model download + caching |
+| LLM Gateway | litellm | >=1.40 | Provider-agnostic LLM access (Ollama, OpenAI, etc.) |
 | Terminal UI | Rich | >=14.0 | Live panels, tables, styled text |
 | Numerics | NumPy | >=2.0 | Audio buffers, array ops |
 | Runtime | Python | >=3.12 | Modern type syntax, slots |
@@ -79,7 +80,8 @@ Display Loop (async)
   - `<|audio_start|>` / `<|audio_end|>` — audio boundary markers
   - `<|audio_pad|>` (id=151676) — placeholder for audio features
   - EOS tokens: 151645, 151643
-- Chat template format: `<|im_start|>system\n<|im_end|>\n<|im_start|>user\n<|audio_start|>...<|audio_end|><|im_end|>\n<|im_start|>assistant\nlanguage English<asr_text>`
+- Chat template format: `<|im_start|>system\n{context}<|im_end|>\n<|im_start|>user\n<|audio_start|>...<|audio_end|><|im_end|>\n<|im_start|>assistant\nlanguage English<asr_text>`
+- **Context biasing**: The system prompt accepts domain vocabulary text that biases the decoder toward specific terms. This is a native Qwen3-ASR feature trained during SFT. Exposed via `--context` / `--context-file` CLI flags.
 
 ## Concurrency Model
 
@@ -87,7 +89,8 @@ Display Loop (async)
 - **GPU lock** (`asyncio.Lock`): MLX is not re-entrant; serialize all GPU calls
 - **Buffer lock** (`asyncio.Lock`): protects ring buffer during concurrent read/write
 - **Audio callback**: runs on sounddevice thread, uses `call_soon_threadsafe` to enqueue
-- **`asyncio.to_thread`**: offloads blocking model calls (transcribe, analyze) to thread pool
+- **`asyncio.to_thread`**: offloads blocking model calls (transcribe, analyze, rewrite) to thread pool
+- **Turn callback**: `on_turn_complete` async callback on RealtimeTranscriber fires after each finalized turn; used by notes pipeline for LLM rewriting without subclassing
 
 ## Audio Processing Details
 
@@ -113,12 +116,35 @@ transcribe         (mlx, numpy, mlx_lm, model, protocols)
 audio/ring_buffer  (numpy)
 audio/vad          (numpy, webrtcvad)
 analysis           (re, mlx_lm, env, protocols)
+rewrite            (litellm, constants)
+notes              (asyncio, pathlib, constants, env, rewrite, pipeline)
 ui                 (rich, analysis)
 pipeline           (asyncio, numpy, sounddevice, rich, all dictate modules)
-cli                (argparse, asyncio, sounddevice, rich, constants, env, pipeline)
+cli                (argparse, asyncio, constants, env, pipeline, notes, rewrite)
 ```
 
 No circular dependencies. Strictly bottom-up.
+
+## Notes Pipeline
+
+The notes mode (`dictate notes`) adds a two-layer approach for domain-accurate structured notes:
+
+```
+Layer 1: ASR Context Biasing
+    --context "Kubernetes, etcd, CoreDNS"
+    → injected into Qwen3-ASR system prompt
+    → decoder biased toward domain vocabulary during transcription
+
+Layer 2: LLM Rewriting
+    --rewrite-model ollama/llama3.2
+    --system-prompt "Format as meeting minutes"
+    → each finalized turn sent to external LLM via litellm
+    → returns structured markdown appended to session file
+```
+
+Integration is callback-based: `RealtimeTranscriber.on_turn_complete` fires after each finalized turn. The notes pipeline passes an async closure that calls `rewrite_transcript()` via `asyncio.to_thread()` (litellm is blocking) then appends to the output file. The callback does not hold the GPU lock since it calls an external LLM, not the local MLX GPU.
+
+Output files are saved to `$DICTATE_NOTES_DIR` (default `~/.local/share/dictate/notes/`) as timestamped markdown, or to a path specified by `--notes-file`. On rewrite failure, the raw transcript is preserved.
 
 ## Key Patterns
 
@@ -127,3 +153,5 @@ No circular dependencies. Strictly bottom-up.
 3. **Streaming generation**: `generate_step` yields tokens one at a time for low-latency display
 4. **Warmup**: dummy audio transcription on startup primes JIT caches and triggers one-time warnings off-screen
 5. **TTY detection**: auto-disable Rich UI when stdout is piped; clean transcript lines only
+6. **Callback-based extension**: `on_turn_complete` callback on pipeline allows new features (notes, webhooks) without subclassing
+7. **Error resilience in rewrite**: exceptions captured in `RewriteResult.error`, raw transcript preserved on failure
