@@ -91,7 +91,8 @@ Display Loop (async)
 - **Buffer lock** (`asyncio.Lock`): protects ring buffer during concurrent read/write
 - **Audio callback**: runs on sounddevice thread, uses `call_soon_threadsafe` to enqueue
 - **`asyncio.to_thread`**: offloads blocking model calls (transcribe, analyze, rewrite) to thread pool
-- **Turn callback**: `on_turn_complete` async callback on RealtimeTranscriber fires after each finalized turn; used by notes pipeline for LLM rewriting without subclassing
+- **Turn callback**: `on_turn_complete` async callback on RealtimeTranscriber fires after each finalized turn (live transcription mode)
+- **Notes TUI isolation**: `notes_app.py` does not depend on `pipeline.py` — it directly uses the same building blocks (RingBuffer, VAD, transcribe) with Textual managing the lifecycle
 
 ## Audio Processing Details
 
@@ -118,8 +119,8 @@ audio/ring_buffer  (numpy)
 audio/vad          (numpy, webrtcvad)
 analysis           (re, mlx_lm, env, protocols)
 rewrite            (litellm, constants)
-notes              (pathlib, constants, env, rewrite, notes_app)
-notes_app          (textual, rich, asyncio, notes, rewrite, pipeline)
+notes              (pathlib, numpy, rich, constants, env, model, transcribe, notes_app)
+notes_app          (textual, rich, asyncio, numpy, sounddevice, notes, rewrite, transcribe, audio)
 ui                 (rich, analysis)
 pipeline           (asyncio, numpy, sounddevice, rich, all dictate modules)
 cli                (argparse, constants, env, pipeline, notes, rewrite)
@@ -156,9 +157,7 @@ Notes mode uses a Textual full-screen TUI with manual commit workflow:
 
 **VAD + manual commit coexistence**: `_handle_turn_complete()` still fires on VAD silence (required for ASR buffer management), but the `on_turn_complete` callback only appends to an accumulator list — it does not auto-trigger rewrite. The user presses Enter when ready to commit.
 
-**Pipeline integration**: The Textual app runs `RealtimeTranscriber` in a `@work(thread=True)` worker with `quiet=True` (suppresses the built-in display loop). The app's 100ms timer reads `transcriber.current_transcript` for partial display. Rewrite runs in a separate thread worker via `rewrite_transcript()`.
-
-**Stream control**: `pipeline.py` exposes `self.stream` (the `sd.InputStream`) and `self.stop_event` so the app can pause/resume recording and signal clean shutdown.
+**Architecture**: The Textual app does NOT use `RealtimeTranscriber`. Instead, `notes.run_notes_pipeline()` loads the ASR model and runs warmup *before* Textual starts (subprocess-safe, fd-safe). Then Textual owns the terminal and event loop. The app directly manages `RingBuffer`, `VoiceActivityDetector`, `sd.InputStream`, and an `asyncio.Queue` — with a `_processor()` task running on Textual's own event loop. ASR inference uses Python-level `redirect_stdout`/`redirect_stderr` only (no `os.dup2`) to avoid fd conflicts with Textual's terminal rendering. Rewrite runs in a separate `@work(thread=True)` worker via `rewrite_transcript()`.
 
 Output files are saved to `$DICTATE_NOTES_DIR` (default `~/.local/share/dictate/notes/`) as timestamped markdown, or to a path specified by `--notes-file`. On rewrite failure, the raw transcript is preserved.
 
@@ -169,5 +168,6 @@ Output files are saved to `$DICTATE_NOTES_DIR` (default `~/.local/share/dictate/
 3. **Streaming generation**: `generate_step` yields tokens one at a time for low-latency display
 4. **Warmup**: dummy audio transcription on startup primes JIT caches and triggers one-time warnings off-screen
 5. **TTY detection**: auto-disable Rich UI when stdout is piped; clean transcript lines only
-6. **Callback-based extension**: `on_turn_complete` callback on pipeline allows new features (notes, webhooks) without subclassing
+6. **Pre-load before TUI**: ASR model loaded + warmed up before Textual starts, avoiding subprocess/fd conflicts
+7. **Callback-based extension**: `on_turn_complete` callback on pipeline allows new features (webhooks) without subclassing
 7. **Error resilience in rewrite**: exceptions captured in `RewriteResult.error`, raw transcript preserved on failure

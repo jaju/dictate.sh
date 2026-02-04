@@ -68,7 +68,7 @@ src/dictate/
     decoder.py          — text decoder nn.Modules
     asr.py              — Qwen3ASRModel composite
     loader.py           — load_qwen3_asr()
-  transcribe.py        — transcribe() generator
+  transcribe.py        — transcribe() generator + is_meaningful() filter
   audio/
     __init__.py         — re-exports
     ring_buffer.py      — RingBuffer (mutable, perf-critical)

@@ -104,9 +104,21 @@ uv run dictate notes --rewrite-model ollama/llama3.2 \
 | `--system-prompt` | System prompt to guide rewriting style |
 | `--system-prompt-file` | Path to file containing the system prompt |
 | `--notes-file` | Output file path (default: auto-named in notes directory) |
+| `--vocab-file` | JSON vocabulary corrections file (default: `~/.config/dictate/vocab.json`) |
 
 Notes are saved to `$DICTATE_NOTES_DIR` (default: `~/.local/share/dictate/notes/`) as
 timestamped markdown files. Use `--notes-file` to write to a specific path instead.
+
+### Notes Mode Key Bindings
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Commit accumulated speech through LLM rewrite |
+| `Space` | Pause / resume recording |
+| `q` | Quit (saves uncommitted text raw to file) |
+
+The notes TUI has two panels: the left panel (40%) shows accumulated speech turns
+with vocab corrections, and the right panel (60%) shows rewritten markdown output.
 
 ## ASR Context Biasing
 
@@ -151,7 +163,7 @@ Any model supported by [litellm](https://docs.litellm.ai/docs/providers) works.
 
 - The Rich live UI renders on `stderr`; `stdout` carries clean transcript lines.
 - When `stdout` is not a TTY, the UI is automatically suppressed.
-- Notes mode uses `--no-ui` implicitly and logs progress to `stderr`.
+- Notes mode uses a full-screen Textual TUI (separate from the Rich live UI).
 
 ```bash
 # Pipe raw transcripts to another tool
