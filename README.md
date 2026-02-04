@@ -1,108 +1,186 @@
 # dictate.sh
 
-Standalone, low-latency speech transcription for Apple Silicon.
+Real-time speech-to-text and voice-driven notes for Apple Silicon.
 
-`dictate.sh` uses MLX for fast, local ASR with VAD-based turn detection, plus optional
-LLM intent analysis. It ships as a single Python script with inline dependencies
-so you can run it with `uv` and start talking.
+`dictate.sh` uses MLX for fast, local ASR (Qwen3-ASR) with VAD-based turn detection.
+Beyond live transcription, it supports a **notes mode** that pipes each spoken turn
+through an LLM (via [litellm](https://github.com/BerriAI/litellm)) to produce
+clean, structured markdown — useful for meeting notes, voice journaling,
+and domain-specific dictation.
 
 ## Features
 
-- Low-latency, rolling-window ASR (MLX)
-- Voice activity detection (VAD) for turn boundaries
+- Low-latency, streaming ASR on Apple Silicon (MLX)
+- Voice activity detection (VAD) for automatic turn boundaries
+- **ASR context biasing** — supply domain vocabulary to improve transcription accuracy
+- **Notes mode** — LLM-rewritten markdown notes saved to file, per session
+- Configurable rewrite system prompts for domain-specific style and structure
+- Supports any litellm-compatible LLM backend (Ollama, OpenAI, Claude, etc.)
 - Optional intent analysis with a local LLM
-- Live terminal UI (status, transcript, stats) via Rich
-- Works offline after models are downloaded
+- Live terminal UI (Rich) with clean stdout for piping
+- Fully offline after models are downloaded (with local LLM backends)
 
 ## Requirements
 
 - macOS on Apple Silicon (MLX)
-- Python >= 3.10
-- `uv` installed
+- Python >= 3.12
+- [`uv`](https://docs.astral.sh/uv/) installed
 - Microphone permission granted to your terminal
+- For notes mode: an LLM backend (e.g., [Ollama](https://ollama.com/) running locally)
 
-## Quick start
+## Quick Start
 
-```bash
-uv run stt.py
-```
-
-With intent analysis:
+Live transcription (default mode):
 
 ```bash
-uv run stt.py --analyze
+uv run dictate
 ```
 
-Choose a different ASR model:
+Notes mode — transcribe and rewrite into markdown:
 
 ```bash
-uv run stt.py --model mlx-community/Qwen3-ASR-1.7B-8bit
+uv run dictate notes --rewrite-model ollama/llama3.2
 ```
 
-List audio input devices:
+With domain vocabulary for better transcription accuracy:
 
 ```bash
-uv run stt.py --list-devices
+uv run dictate notes --rewrite-model ollama/llama3.2 \
+    --context "Kubernetes, kubectl, etcd, CoreDNS, Istio"
 ```
 
-Use a specific input device:
+With a custom system prompt for the rewriter:
 
 ```bash
-uv run stt.py --device 3
+uv run dictate notes --rewrite-model ollama/llama3.2 \
+    --system-prompt "You are a medical scribe. Format as SOAP notes."
 ```
 
-## CLI options
+Or load the system prompt from a file:
 
-- `--model`: ASR model (default: `mlx-community/Qwen3-ASR-0.6B-8bit`)
-- `--language`: Transcription language (default: `English`)
-- `--transcribe-interval`: Seconds between updates (default: `0.5`)
-- `--vad-frame-ms`: VAD frame size (10/20/30, default: `30`)
-- `--vad-mode`: VAD aggressiveness 0-3 (default: `2`)
-- `--vad-silence-ms`: Silence to finalize a turn (default: `500`)
-- `--min-words`: Minimum words to finalize a turn (default: `3`)
-- `--analyze`: Enable LLM intent analysis
-- `--llm-model`: LLM model to use for analysis (default: `mlx-community/Qwen3-0.6B-4bit`)
-- `--no-ui`: Disable the Rich live UI
-- `--list-devices`: List audio input devices
-- `--device`: Audio input device index
+```bash
+uv run dictate notes --rewrite-model ollama/llama3.2 \
+    --system-prompt-file ~/prompts/meeting-notes.txt
+```
 
-## Recommended models
+Save notes to a specific file:
 
-ASR (MLX Qwen3-ASR):
+```bash
+uv run dictate notes --rewrite-model ollama/llama3.2 \
+    --notes-file ./meeting-2026-02-04.md
+```
 
-- `mlx-community/Qwen3-ASR-0.6B-4bit`: fastest, lowest quality
-- `mlx-community/Qwen3-ASR-0.6B-8bit`: good balance (default)
-- `mlx-community/Qwen3-ASR-0.6B-bf16`: higher quality, more RAM
-- `mlx-community/Qwen3-ASR-1.7B-8bit`: higher quality, slower
+## CLI Reference
 
-LLM (for `--analyze`):
+### Shared Options (all modes)
 
-- `mlx-community/Qwen3-0.6B-4bit`: fastest, lowest RAM (default)
-- `mlx-community/Qwen3-1.7B-4bit`: better quality, slower
-- `mlx-community/Mistral-7B-Instruct-v0.2-4bit`: heavier
-- `mlx-community/Llama-3.1-8B-Instruct-4bit`: heavier
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--model` | `mlx-community/Qwen3-ASR-0.6B-8bit` | ASR model |
+| `--language` | `English` | Transcription language |
+| `--context` | — | Domain vocabulary for ASR context biasing |
+| `--context-file` | — | File containing domain vocabulary |
+| `--transcribe-interval` | `0.5` | Seconds between ASR updates |
+| `--vad-frame-ms` | `30` | VAD frame size (10/20/30) |
+| `--vad-mode` | `2` | VAD aggressiveness (0-3) |
+| `--vad-silence-ms` | `500` | Silence to finalize a turn (ms) |
+| `--min-words` | `3` | Minimum words to finalize a turn |
+| `--device` | — | Audio input device index |
+| `--list-devices` | — | List audio input devices |
+
+### Transcription Mode (`dictate`)
+
+| Option | Description |
+|--------|-------------|
+| `--analyze` | Enable LLM intent analysis on turn completion |
+| `--llm-model` | LLM for intent analysis (default: `mlx-community/Qwen3-0.6B-4bit`) |
+| `--no-ui` | Disable the Rich live UI |
+
+### Notes Mode (`dictate notes`)
+
+| Option | Description |
+|--------|-------------|
+| `--rewrite-model` | **(required)** LLM model for rewriting (e.g., `ollama/llama3.2`) |
+| `--system-prompt` | System prompt to guide rewriting style |
+| `--system-prompt-file` | Path to file containing the system prompt |
+| `--notes-file` | Output file path (default: auto-named in notes directory) |
+
+Notes are saved to `$DICTATE_NOTES_DIR` (default: `~/.local/share/dictate/notes/`) as
+timestamped markdown files. Use `--notes-file` to write to a specific path instead.
+
+## ASR Context Biasing
+
+Qwen3-ASR supports context biasing — you can supply domain-specific terms, acronyms,
+or names that the model will prefer during decoding. This is built into the model's
+architecture (trained during SFT), not a post-processing hack.
+
+Use `--context` for inline terms or `--context-file` to load from a file:
+
+```bash
+# Inline domain vocabulary
+uv run dictate --context "MLX, Qwen, WebRTC, VAD, litellm"
+
+# From a file (one term per line, or freeform text)
+uv run dictate --context-file ~/vocab/medical-terms.txt
+```
+
+Context biasing works in both transcription and notes modes.
+
+## Recommended Models
+
+### ASR (MLX Qwen3-ASR)
+
+| Model | Notes |
+|-------|-------|
+| `mlx-community/Qwen3-ASR-0.6B-4bit` | Fastest, lowest quality |
+| `mlx-community/Qwen3-ASR-0.6B-8bit` | Good balance (default) |
+| `mlx-community/Qwen3-ASR-0.6B-bf16` | Higher quality, more RAM |
+| `mlx-community/Qwen3-ASR-1.7B-8bit` | Higher quality, slower |
+
+### LLM for Notes Rewriting (via litellm)
+
+| Model | Backend | Notes |
+|-------|---------|-------|
+| `ollama/llama3.2` | Ollama | Good local default |
+| `ollama/mistral` | Ollama | Strong instruction following |
+| `openai/gpt-4o-mini` | OpenAI | Cloud, fast and cheap |
+
+Any model supported by [litellm](https://docs.litellm.ai/docs/providers) works.
 
 ## UI and Piping
 
-- The Rich live UI renders on `stderr` to keep `stdout` clean for scripting.
-- If `stdout` is not a TTY (e.g., when piping to another tool), `stt.py` automatically suppresses the UI elements and prints raw transcript lines to `stdout`.
-- Use `--no-ui` to force-disable the visual interface even in a TTY.
+- The Rich live UI renders on `stderr`; `stdout` carries clean transcript lines.
+- When `stdout` is not a TTY, the UI is automatically suppressed.
+- Notes mode uses `--no-ui` implicitly and logs progress to `stderr`.
 
 ```bash
-# Pipe raw transcripts into another tool
-uv run stt.py | grep "important"
+# Pipe raw transcripts to another tool
+uv run dictate | grep "important"
+
+# Watch notes being written in real-time
+uv run dictate notes --rewrite-model ollama/llama3.2 &
+tail -f ~/.local/share/dictate/notes/*.md
 ```
 
 ## Troubleshooting
 
-- Too many short turns: increase `--vad-silence-ms` or lower `--vad-mode`.
-- No audio: check mic permissions or try `--list-devices` + `--device`.
-- Laggy output: reduce `--transcribe-interval`.
+- **Too many short turns**: increase `--vad-silence-ms` or lower `--vad-mode`
+- **No audio**: check mic permissions or try `--list-devices` + `--device`
+- **Laggy output**: reduce `--transcribe-interval`
+- **Notes rewrite failures**: check that your LLM backend is running (e.g., `ollama serve`). Raw transcripts are saved on rewrite failure.
+- **Domain words misrecognized**: use `--context` or `--context-file` with your vocabulary
 
 ## Logging
 
 - Set `LOG_LEVEL=DEBUG` for verbose logs.
-- Hugging Face HTTP request logs are suppressed by default.
+- Hugging Face and httpx request logs are suppressed by default.
+
+## Acknowledgements
+
+This project is built upon [dictate.sh by Marc Puig](https://github.com/mpuig/dictate.sh),
+which provided the original implementation of real-time speech transcription using MLX
+on Apple Silicon. The foundational architecture — audio capture pipeline, VAD-based turn
+detection, streaming ASR with Qwen3, and the Rich terminal UI — originates from that work.
 
 ## License
 

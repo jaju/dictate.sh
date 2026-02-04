@@ -2,15 +2,15 @@
 
 ## Project
 
-**dictate.sh** — Real-time speech-to-text for Apple Silicon using MLX.
-Single-file Python script (`stt.py`, ~1688 lines) being refactored into a `src/dictate/` package.
+**dictate.sh** — Real-time speech-to-text and voice-driven notes for Apple Silicon using MLX.
+Packaged as `src/dictate/` with subcommands: bare `dictate` for live transcription, `dictate notes` for LLM-rewritten markdown notes.
 
 ## Quick Start
 
 - Python 3.12+, `uv` for all commands (`uv sync`, `uv run`, `uv pip`)
 - Apple Silicon Mac required (MLX framework)
 - **Virtual env**: Use `.venv/bin/python` for running Python directly (NOT `uv run python`)
-- Run: `uv run stt.py` (current) → `uv run dictate` (after refactor)
+- Run: `uv run dictate` (transcription), `uv run dictate notes --rewrite-model ollama/llama3.2` (notes)
 - Sanity checks: `.venv/bin/python -c "from dictate.xxx import ..."` to validate modules
 
 ## Work Protocol
@@ -22,6 +22,8 @@ Single-file Python script (`stt.py`, ~1688 lines) being refactored into a `src/d
 5. **End of session**: `bd sync` to persist state.
 
 **Dependency context propagation**: When completing a task, always check which tasks it blocks (`bd show <id>` lists blockers). Update those dependent tasks' descriptions with implementation details that will help the next session pick up work without re-exploring. This is critical for multi-session work.
+
+**Fresh context over assumptions**: Task descriptions should reference core documentation files (`CLAUDE.md`, `ARCHITECTURE.md`, `README.md`) rather than hardcoding architectural assumptions. When picking up a task, always re-read these files for current state — the codebase evolves and earlier task descriptions may be stale. The docs are the source of truth.
 
 ## Issue Tracking
 
