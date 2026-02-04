@@ -17,6 +17,7 @@ dictate.sh is a real-time speech-to-text tool and voice-driven notes system for 
 | Model Hub | huggingface-hub | >=0.27 | Model download + caching |
 | LLM Gateway | litellm | >=1.40 | Provider-agnostic LLM access (Ollama, OpenAI, etc.) |
 | Terminal UI | Rich | >=14.0 | Live panels, tables, styled text |
+| Notes TUI | Textual | >=1.0 | Full-screen TUI for notes mode |
 | Numerics | NumPy | >=2.0 | Audio buffers, array ops |
 | Runtime | Python | >=3.12 | Modern type syntax, slots |
 
@@ -117,10 +118,11 @@ audio/ring_buffer  (numpy)
 audio/vad          (numpy, webrtcvad)
 analysis           (re, mlx_lm, env, protocols)
 rewrite            (litellm, constants)
-notes              (asyncio, pathlib, constants, env, rewrite, pipeline)
+notes              (pathlib, constants, env, rewrite, notes_app)
+notes_app          (textual, rich, asyncio, notes, rewrite, pipeline)
 ui                 (rich, analysis)
 pipeline           (asyncio, numpy, sounddevice, rich, all dictate modules)
-cli                (argparse, asyncio, constants, env, pipeline, notes, rewrite)
+cli                (argparse, constants, env, pipeline, notes, rewrite)
 ```
 
 No circular dependencies. Strictly bottom-up.
@@ -142,7 +144,21 @@ Layer 2: LLM Rewriting
     → returns structured markdown appended to session file
 ```
 
-Integration is callback-based: `RealtimeTranscriber.on_turn_complete` fires after each finalized turn. The notes pipeline passes an async closure that calls `rewrite_transcript()` via `asyncio.to_thread()` (litellm is blocking) then appends to the output file. The callback does not hold the GPU lock since it calls an external LLM, not the local MLX GPU.
+### Textual TUI (notes_app.py)
+
+Notes mode uses a Textual full-screen TUI with manual commit workflow:
+
+- **Left panel** (40%): debounced, vocab-corrected transcript. VAD turns accumulate here across silence boundaries.
+- **Right panel** (60%): scrollable RichLog showing rewritten markdown, separated by rules.
+- **Footer**: live pipeline state (VAD, buffer, ASR latency, turn count) + key bindings.
+
+**Key bindings**: Enter commits accumulated text through LLM rewrite, Space pauses/resumes recording, q quits (saving uncommitted text raw).
+
+**VAD + manual commit coexistence**: `_handle_turn_complete()` still fires on VAD silence (required for ASR buffer management), but the `on_turn_complete` callback only appends to an accumulator list — it does not auto-trigger rewrite. The user presses Enter when ready to commit.
+
+**Pipeline integration**: The Textual app runs `RealtimeTranscriber` in a `@work(thread=True)` worker with `quiet=True` (suppresses the built-in display loop). The app's 100ms timer reads `transcriber.current_transcript` for partial display. Rewrite runs in a separate thread worker via `rewrite_transcript()`.
+
+**Stream control**: `pipeline.py` exposes `self.stream` (the `sd.InputStream`) and `self.stop_event` so the app can pause/resume recording and signal clean shutdown.
 
 Output files are saved to `$DICTATE_NOTES_DIR` (default `~/.local/share/dictate/notes/`) as timestamped markdown, or to a path specified by `--notes-file`. On rewrite failure, the raw transcript is preserved.
 

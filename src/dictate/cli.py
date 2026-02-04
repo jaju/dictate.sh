@@ -196,9 +196,7 @@ def _run_transcribe(args: argparse.Namespace) -> int:
 
 
 def _run_notes(args: argparse.Namespace) -> int:
-    """Run the notes pipeline."""
-    import asyncio
-
+    """Run the notes pipeline (Textual TUI)."""
     from dictate.constants import DEFAULT_REWRITE_SYSTEM_PROMPT
     from dictate.notes import (
         NotesConfig,
@@ -224,19 +222,17 @@ def _run_notes(args: argparse.Namespace) -> int:
         output_path=resolve_notes_path(args.notes_file),
     )
 
-    asyncio.run(
-        run_notes_pipeline(
-            model_path=args.model,
-            language=args.language,
-            context=_resolve_context(args),
-            transcribe_interval=args.transcribe_interval,
-            vad_frame_ms=args.vad_frame_ms,
-            vad_mode=args.vad_mode,
-            vad_silence_ms=args.vad_silence_ms,
-            min_words=args.min_words,
-            device=args.device,
-            notes_config=notes_config,
-        )
+    run_notes_pipeline(
+        model_path=args.model,
+        language=args.language,
+        context=_resolve_context(args),
+        transcribe_interval=args.transcribe_interval,
+        vad_frame_ms=args.vad_frame_ms,
+        vad_mode=args.vad_mode,
+        vad_silence_ms=args.vad_silence_ms,
+        min_words=args.min_words,
+        device=args.device,
+        notes_config=notes_config,
     )
     return 0
 

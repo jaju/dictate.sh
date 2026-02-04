@@ -49,7 +49,7 @@ See `ARCHITECTURE.md` for full technical details.
 - **Frozen dataclasses**: All config types are `@dataclass(frozen=True, slots=True)`
 - **Functional over OO**: Pure functions where state is not needed. Module-level functions over methods.
 - **Immutable over mutable**: `tuple` over `list` for fixed collections. Factory functions over `__post_init__` mutation.
-- **Dependencies**: mlx>=0.30.0, mlx-lm>=0.30.0, numpy>=2.0, rich>=14.0, webrtcvad-wheels>=2.0.14, litellm>=1.40
+- **Dependencies**: mlx>=0.30.0, mlx-lm>=0.30.0, numpy>=2.0, rich>=14.0, webrtcvad-wheels>=2.0.14, litellm>=1.40, textual>=1.0
 - **Root `stt.py`**: Thin shim that imports from `dictate.cli`. No longer the full script.
 
 ## File Layout (Target)
@@ -75,8 +75,9 @@ src/dictate/
     vad.py              — VadConfig + VoiceActivityDetector
   analysis.py          — IntentResult + analyze_intent()
   rewrite.py           — RewriteConfig + RewriteResult + rewrite_transcript()
-  notes.py             — NotesConfig + notes pipeline orchestrator
-  ui.py                — UiState + pure render functions
+  notes.py             — NotesConfig + notes pipeline orchestrator + helpers
+  notes_app.py         — Textual TUI for notes mode (manual commit workflow)
+  ui.py                — UiState + pure render functions (transcription mode)
   pipeline.py          — RealtimeTranscriber (orchestration, on_turn_complete callback)
   cli.py               — subcommands (bare transcribe + notes) + main()
 ```
