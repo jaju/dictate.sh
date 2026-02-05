@@ -13,6 +13,7 @@ import asyncio
 import contextlib
 import io
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +25,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.events import Click
 from textual.screen import ModalScreen
-from textual.widgets import Header, Markdown, Static, TextArea
+from textual.widgets import Header, ListItem, ListView, Markdown, Static, TextArea
 
 from voiss.audio.ring_buffer import RingBuffer
 from voiss.audio.vad import VadConfig, VoiceActivityDetector
@@ -44,6 +45,24 @@ _PANEL_IDS: dict[str, tuple[str, str]] = {
     "left": ("left-container", "speech-editor"),
     "right": ("right-container", "output-editor"),
 }
+
+_HISTORY_PREVIEW_MAX = 80
+
+
+def _make_preview(text: str) -> str:
+    """Collapse whitespace and truncate for one-line history preview."""
+    oneline = " ".join(text.split())
+    if len(oneline) > _HISTORY_PREVIEW_MAX:
+        return oneline[: _HISTORY_PREVIEW_MAX - 1] + "\u2026"
+    return oneline
+
+
+@dataclass(slots=True)
+class HistoryEntry:
+    """A committed turn stored in the history index."""
+
+    raw_text: str
+    preview: str
 
 
 class DiscardConfirmScreen(ModalScreen[bool]):
@@ -143,10 +162,27 @@ class VoissNotesApp(App):
         height: auto;
         padding: 0 1;
     }
+    #history-list {
+        height: auto;
+        max-height: 30%;
+        min-height: 3;
+        border-bottom: solid $primary-lighten-3;
+        overflow-y: auto;
+    }
+    #history-list.-locked {
+        opacity: 0.35;
+    }
+    #history-list > ListItem {
+        height: 1;
+        padding: 0 1;
+    }
     #speech-editor {
         height: 1fr;
         border: none;
         overflow-y: auto;
+    }
+    #left-container.-previewing #speech-editor {
+        border: dashed $warning;
     }
     #right-container {
         width: 60%;
@@ -275,6 +311,11 @@ class VoissNotesApp(App):
         self._editing_target: str | None = None  # "speech-editor" or "output-editor"
         self._edit_snapshot: str = ""  # for cancel/revert
 
+        # History index state
+        self._history: list[HistoryEntry] = []
+        self._previewing_history: bool = False
+        self._previewing_index: int | None = None
+
     def _state_header(self) -> str:
         """Return Rich-markup header line reflecting current recording state."""
         if self._recording:
@@ -286,6 +327,7 @@ class VoissNotesApp(App):
         with Horizontal(id="middle"):
             with Vertical(id="left-container"):
                 yield Static(self._state_header(), id="speech-header")
+                yield ListView(id="history-list")
                 yield TextArea("", id="speech-editor", read_only=True)
             with Vertical(id="right-container"):
                 yield Markdown("", id="output-display")
@@ -297,6 +339,11 @@ class VoissNotesApp(App):
         self.query_one("#speech-editor", TextArea).can_focus = False
         self.query_one("#output-editor", TextArea).can_focus = False
         self.query_one("#output-display", Markdown).can_focus = False
+
+        # History list starts locked and dimmed (empty)
+        history_lv = self.query_one("#history-list", ListView)
+        history_lv.can_focus = False
+        history_lv.add_class("-locked")
 
         write_session_header(self._notes_config.output_path)
 
@@ -363,6 +410,12 @@ class VoissNotesApp(App):
         container_id, _ = _PANEL_IDS[panel]
         self.query_one(f"#{container_id}").add_class("-selected")
         self._selected_panel = panel
+
+        # Auto-focus history list when selecting left panel with history available
+        if panel == "left" and not self._recording and self._history:
+            lv = self.query_one("#history-list", ListView)
+            lv.focus()
+
         self._update_status_bar()
 
     # ── Audio ────────────────────────────────────────────────────────
@@ -516,10 +569,18 @@ class VoissNotesApp(App):
         if self._asr_ms is not None:
             parts.append(f"ASR: {self._asr_ms:.0f}ms")
         parts.append(f"Turns: {self._turn_count}")
+        if self._history:
+            parts.append(f"History: {len(self._history)}")
+        if self._previewing_history and self._previewing_index is not None:
+            parts.append(f"Viewing #{self._previewing_index + 1}")
 
         parts.append("|")
         if self._editing:
             parts.append("^S Save  \u238b Cancel")
+        elif self._previewing_history:
+            parts.append(
+                "\u2191\u2193 Navigate  \u238b Exit preview"
+            )
         else:
             parts.append(
                 "\u2423 Rec  \u21e5 Select  e Edit  E Ext Edit  \u23ce Raw  r Rewrite  \u238b Discard  q Quit"
@@ -557,23 +618,10 @@ class VoissNotesApp(App):
                 apply_vocab(raw_partial, vocab) if vocab else raw_partial
             )
 
-        # Only update left editor when NOT being edited
+        # Only update left editor when NOT being edited and NOT previewing history
         if not (self._editing and self._editing_target == "speech-editor"):
-            editor = self.query_one("#speech-editor", TextArea)
-            lines: list[str] = []
-
-            for turn_text in self._turn_accumulator:
-                lines.append(turn_text)
-
-            if self._turn_accumulator and self._current_partial:
-                lines.append("---")
-
-            if self._current_partial:
-                lines.append(self._current_partial)
-
-            new_text = "\n\n".join(lines)
-            if editor.text != new_text:
-                editor.text = new_text
+            if not self._previewing_history:
+                self._refresh_live_text()
 
     def on_text_area_changed(self, event: TextArea.Changed) -> None:
         """Track right-panel edits for debounced file save."""
@@ -659,6 +707,60 @@ class VoissNotesApp(App):
         self._last_partial_raw = ""
         self._current_transcript = ""
 
+    # ── History helpers ──────────────────────────────────────────────
+
+    def _add_history_entry(self, text: str) -> None:
+        """Create a HistoryEntry and append it to the history ListView."""
+        preview = _make_preview(text)
+        entry = HistoryEntry(raw_text=text, preview=preview)
+        self._history.append(entry)
+        lv = self.query_one("#history-list", ListView)
+        lv.append(ListItem(Static(preview)))
+
+    def _exit_history_preview(self) -> None:
+        """Exit history preview mode and restore live TextArea content."""
+        self._previewing_history = False
+        self._previewing_index = None
+        lv = self.query_one("#history-list", ListView)
+        lv.index = None
+        container = self.query_one("#left-container")
+        container.remove_class("-previewing")
+        self._refresh_live_text()
+
+    def _refresh_live_text(self) -> None:
+        """Rebuild TextArea from turn accumulator + current partial."""
+        editor = self.query_one("#speech-editor", TextArea)
+        lines: list[str] = []
+        for turn_text in self._turn_accumulator:
+            lines.append(turn_text)
+        if self._turn_accumulator and self._current_partial:
+            lines.append("---")
+        if self._current_partial:
+            lines.append(self._current_partial)
+        new_text = "\n\n".join(lines)
+        if editor.text != new_text:
+            editor.text = new_text
+
+    def _show_history_preview(self, index: int) -> None:
+        """Show a history entry's full text in the TextArea."""
+        self._previewing_history = True
+        self._previewing_index = index
+        editor = self.query_one("#speech-editor", TextArea)
+        editor.text = self._history[index].raw_text
+        container = self.query_one("#left-container")
+        container.add_class("-previewing")
+        self._update_status_bar()
+
+    def _update_history_lock(self) -> None:
+        """Lock/unlock the history list based on recording state."""
+        lv = self.query_one("#history-list", ListView)
+        if self._recording or not self._history:
+            lv.can_focus = False
+            lv.add_class("-locked")
+        else:
+            lv.can_focus = True
+            lv.remove_class("-locked")
+
     # ── Commit helpers ───────────────────────────────────────────────
 
     def _prepare_commit(self) -> str | None:
@@ -667,6 +769,14 @@ class VoissNotesApp(App):
         Returns the combined text, or None if editing or nothing to commit.
         """
         if self._editing:
+            return None
+
+        if self._previewing_history:
+            self.notify(
+                "Exit history preview first (\u238b)",
+                severity="warning",
+                timeout=2,
+            )
             return None
 
         combined = self._read_left_panel()
@@ -680,9 +790,11 @@ class VoissNotesApp(App):
         self._last_partial_raw = ""
         self._committing = True
 
-        # Clear left editor
+        # Clear left editor and add to history
         editor = self.query_one("#speech-editor", TextArea)
         editor.text = ""
+        self._add_history_entry(combined)
+        self._update_history_lock()
 
         # Reset audio state so stale buffer doesn't re-populate the panel
         if self._ring_buffer:
@@ -723,6 +835,14 @@ class VoissNotesApp(App):
             )
             return
 
+        if self._selected_panel == "left" and self._previewing_history:
+            self.notify(
+                "Exit history preview first (\u238b)",
+                severity="warning",
+                timeout=2,
+            )
+            return
+
         container_id, editor_id = _PANEL_IDS[self._selected_panel]
         editor = self.query_one(f"#{editor_id}", TextArea)
         container = self.query_one(f"#{container_id}")
@@ -750,6 +870,13 @@ class VoissNotesApp(App):
         if self._selected_panel is None:
             self.notify(
                 "Select a panel first (Tab or click)",
+                severity="warning",
+                timeout=2,
+            )
+            return
+        if self._selected_panel == "left" and self._previewing_history:
+            self.notify(
+                "Exit history preview first (\u238b)",
                 severity="warning",
                 timeout=2,
             )
@@ -817,7 +944,7 @@ class VoissNotesApp(App):
         self.notify("Saved", severity="information", timeout=1)
 
     def action_escape_action(self) -> None:
-        """Context-sensitive Escape: cancel edit or discard accumulated text."""
+        """Context-sensitive Escape: cancel edit, exit preview, or discard."""
         if self._editing:
             # Revert to snapshot
             if self._editing_target:
@@ -825,6 +952,11 @@ class VoissNotesApp(App):
                 editor.text = self._edit_snapshot
             self._exit_edit_mode()
             self.notify("Edit cancelled", severity="warning", timeout=1)
+            return
+
+        if self._previewing_history:
+            self._exit_history_preview()
+            self._update_status_bar()
             return
 
         # Normal mode: discard
@@ -898,7 +1030,11 @@ class VoissNotesApp(App):
         if self._recording:
             self._stream.stop()
             self._recording = False
+            self._update_history_lock()
         else:
+            # Exit history preview if active
+            if self._previewing_history:
+                self._exit_history_preview()
             # Reset buffer/VAD so stale audio doesn't bleed into new recording
             if self._ring_buffer:
                 self._ring_buffer.reset()
@@ -912,6 +1048,7 @@ class VoissNotesApp(App):
             self._buffer_seconds = 0.0
             self._stream.start()
             self._recording = True
+            self._update_history_lock()
         self._update_status_bar()
 
     def _on_discard_confirmed(self, result: bool) -> None:
@@ -935,6 +1072,25 @@ class VoissNotesApp(App):
         if self._vad:
             self._vad.reset()
         self._buffer_seconds = 0.0
+
+    def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
+        """Show history entry in TextArea when highlighted."""
+        if self._recording or self._editing:
+            return
+        lv = self.query_one("#history-list", ListView)
+        idx = lv.index
+        if idx is not None and 0 <= idx < len(self._history):
+            self._show_history_preview(idx)
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        """Suppress Enter on history list — user must exit preview first."""
+        event.prevent_default()
+        event.stop()
+        self.notify(
+            "Exit history preview first (\u238b)",
+            severity="warning",
+            timeout=2,
+        )
 
     def action_quit_app(self) -> None:
         if self._editing:
