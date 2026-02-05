@@ -161,6 +161,7 @@ def rewrite_transcript(text: str, config: RewriteConfig) -> RewriteResult:
                 {"role": "user", "content": text},
             ],
             max_tokens=config.max_tokens,
+            think=False,
         )
         content = response.choices[0].message.content or ""
         return RewriteResult(
