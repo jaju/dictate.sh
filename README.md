@@ -123,6 +123,7 @@ uv run voiss notes --rewrite-model ollama/llama3.2 \
 | `--vad-mode` | `3` | VAD aggressiveness (0-3) |
 | `--vad-silence-ms` | `500` | Silence to finalize a turn (ms) |
 | `--min-words` | `3` | Minimum words to finalize a turn |
+| `--max-buffer` | `30` | Maximum audio buffer in seconds |
 | `--energy-threshold` | `300.0` | RMS energy gate for noise rejection |
 | `--device` | — | Audio input device index |
 | `--list-devices` | — | List audio input devices |
@@ -312,6 +313,7 @@ tail -f ~/.local/share/voiss/notes/*.md
 - **Background noise triggering VAD**: increase `--energy-threshold` (default 300, try 500-800)
 - **Quiet speech being dropped**: lower `--energy-threshold` (try 100-200)
 - **No audio**: check mic permissions or try `--list-devices` + `--device`
+- **Buffer fills up too fast**: increase `--max-buffer` (default 30s) to allow longer speech before committing
 - **Laggy output**: reduce `--transcribe-interval`
 - **Notes rewrite failures**: check that your LLM backend is running (e.g., `ollama serve`). Raw transcripts are saved on rewrite failure.
 - **Domain words misrecognized**: use `--context` or `--context-file` with your vocabulary. If prompt biasing alone isn't enough, the logit bias (`--context-bias`) will increase token probabilities directly. Try values between 3.0-8.0. Too high (>10) may cause hallucination of biased terms.

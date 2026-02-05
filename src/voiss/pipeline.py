@@ -64,6 +64,7 @@ class RealtimeTranscriber:
         energy_threshold: float = DEFAULT_ENERGY_THRESHOLD,
         bias_terms: tuple[str, ...] = (),
         context_bias: float | None = None,
+        max_buffer_seconds: int = DEFAULT_MAX_BUFFER_SECONDS,
     ) -> None:
         self.model_path = model_path
         self.language = language
@@ -78,6 +79,7 @@ class RealtimeTranscriber:
         self.device = device
         self.no_ui = no_ui
         self.energy_threshold = energy_threshold
+        self.max_buffer_seconds = max_buffer_seconds
         self.sample_rate = DEFAULT_SAMPLE_RATE
 
         self.audio_queue: asyncio.Queue[np.ndarray] = asyncio.Queue(
@@ -95,7 +97,7 @@ class RealtimeTranscriber:
 
         # Audio components
         self.ring_buffer = RingBuffer.create(
-            DEFAULT_MAX_BUFFER_SECONDS, self.sample_rate
+            self.max_buffer_seconds, self.sample_rate
         )
         self.vad = VoiceActivityDetector(
             VadConfig(
@@ -265,7 +267,7 @@ class RealtimeTranscriber:
                 if samples_since >= min_new_samples:
                     async with self.buffer_lock:
                         audio_int16 = self.ring_buffer.get_recent(
-                            DEFAULT_MAX_BUFFER_SECONDS
+                            self.max_buffer_seconds
                         )
 
                     if audio_int16.size >= int(self.sample_rate * 0.3):

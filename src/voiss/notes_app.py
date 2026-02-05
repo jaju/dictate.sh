@@ -215,6 +215,7 @@ class VoissNotesApp(App):
         notes_config: NotesConfig,
         energy_threshold: float = DEFAULT_ENERGY_THRESHOLD,
         logit_bias: dict[int, float] | None = None,
+        max_buffer_seconds: int = DEFAULT_MAX_BUFFER_SECONDS,
     ) -> None:
         super().__init__()
         # Pre-loaded ASR model components
@@ -230,6 +231,7 @@ class VoissNotesApp(App):
         self._notes_config = notes_config
         self._sample_rate = DEFAULT_SAMPLE_RATE
         self._energy_threshold = energy_threshold
+        self._max_buffer_seconds = max_buffer_seconds
 
         # Audio components (created in on_mount)
         self._ring_buffer: RingBuffer | None = None
@@ -311,7 +313,7 @@ class VoissNotesApp(App):
 
         # Create audio components
         self._ring_buffer = RingBuffer.create(
-            DEFAULT_MAX_BUFFER_SECONDS, self._sample_rate
+            self._max_buffer_seconds, self._sample_rate
         )
         self._vad = VoiceActivityDetector(self._vad_config)
         self._audio_queue = asyncio.Queue(maxsize=DEFAULT_AUDIO_QUEUE_MAXSIZE)
@@ -424,7 +426,7 @@ class VoissNotesApp(App):
                 )
                 if samples_since >= min_new_samples:
                     audio_int16 = self._ring_buffer.get_recent(
-                        DEFAULT_MAX_BUFFER_SECONDS
+                        self._max_buffer_seconds
                     )
 
                     if audio_int16.size >= int(self._sample_rate * 0.3):
@@ -503,7 +505,14 @@ class VoissNotesApp(App):
 
         vad_icon = "\u25cf" if self._vad_state == "speech" else "\u25cb"
         parts.append(f"VAD: {vad_icon} {self._vad_state}")
-        parts.append(f"Buffer: {self._buffer_seconds:.1f}s")
+        fill_pct = (self._buffer_seconds / self._max_buffer_seconds) * 100 if self._max_buffer_seconds else 0
+        if fill_pct >= 90:
+            buf_str = f"[bold red]Buffer: {self._buffer_seconds:.0f}/{self._max_buffer_seconds}s ({fill_pct:.0f}%)[/bold red]"
+        elif fill_pct >= 70:
+            buf_str = f"[yellow]Buffer: {self._buffer_seconds:.0f}/{self._max_buffer_seconds}s ({fill_pct:.0f}%)[/yellow]"
+        else:
+            buf_str = f"Buffer: {self._buffer_seconds:.0f}/{self._max_buffer_seconds}s"
+        parts.append(buf_str)
         if self._asr_ms is not None:
             parts.append(f"ASR: {self._asr_ms:.0f}ms")
         parts.append(f"Turns: {self._turn_count}")

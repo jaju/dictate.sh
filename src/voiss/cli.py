@@ -17,6 +17,7 @@ from voiss.constants import (
     DEFAULT_ASR_MODEL,
     DEFAULT_ENERGY_THRESHOLD,
     DEFAULT_LANGUAGE,
+    DEFAULT_MAX_BUFFER_SECONDS,
     DEFAULT_MIN_WORDS,
     DEFAULT_TRANSCRIBE_INTERVAL,
     DEFAULT_VAD_FRAME_MS,
@@ -80,6 +81,12 @@ def _add_shared_stt_args(parser: argparse.ArgumentParser) -> None:
         type=float,
         default=None,
         help="Additive logit bias scale for context terms during ASR decoding (default: from config or 5.0)",
+    )
+    parser.add_argument(
+        "--max-buffer",
+        type=int,
+        default=DEFAULT_MAX_BUFFER_SECONDS,
+        help=f"Maximum audio buffer in seconds (default: {DEFAULT_MAX_BUFFER_SECONDS})",
     )
     parser.add_argument(
         "--energy-threshold",
@@ -232,6 +239,7 @@ def _run_transcribe(args: argparse.Namespace) -> int:
         energy_threshold=args.energy_threshold,
         bias_terms=tuple(bias_terms),
         context_bias=bias_scale,
+        max_buffer_seconds=args.max_buffer,
     )
 
     asyncio.run(transcriber.run())
@@ -289,6 +297,7 @@ def _run_notes(args: argparse.Namespace) -> int:
         energy_threshold=args.energy_threshold,
         bias_terms=tuple(bias_terms),
         context_bias=bias_scale,
+        max_buffer_seconds=args.max_buffer,
     )
     return 0
 

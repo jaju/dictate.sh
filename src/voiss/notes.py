@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from voiss.constants import DEFAULT_NOTES_DIR, DEFAULT_NOTES_DIR_ENV
+from voiss.constants import DEFAULT_MAX_BUFFER_SECONDS, DEFAULT_NOTES_DIR, DEFAULT_NOTES_DIR_ENV
 from voiss.env import LOGGER
 from voiss.rewrite import RewriteConfig, RewriteResult
 
@@ -99,6 +99,7 @@ def run_notes_pipeline(
     energy_threshold: float = 300.0,
     bias_terms: tuple[str, ...] = (),
     context_bias: float | None = None,
+    max_buffer_seconds: int = DEFAULT_MAX_BUFFER_SECONDS,
 ) -> None:
     """Load ASR model, warm up, then launch the Textual TUI.
 
@@ -156,5 +157,6 @@ def run_notes_pipeline(
         notes_config=notes_config,
         energy_threshold=energy_threshold,
         logit_bias=logit_bias,
+        max_buffer_seconds=max_buffer_seconds,
     )
     app.run()
