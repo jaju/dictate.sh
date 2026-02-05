@@ -156,6 +156,7 @@ timestamped markdown files. Use `--notes-file` to write to a specific path inste
 | `Enter` | Commit accumulated speech raw (with vocab corrections, no LLM) |
 | `r` | Commit with LLM rewrite |
 | `e` | Enter edit mode on focused panel |
+| `E` | Open focused panel in `$EDITOR` (neovim, vim, etc.) |
 | `Escape` | Cancel edit (in edit mode) / Discard accumulated text (normal mode) |
 | `Ctrl+S` | Save edit and exit edit mode |
 | `q` | Quit with confirmation (saves uncommitted text raw to file) |

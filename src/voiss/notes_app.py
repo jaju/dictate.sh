@@ -192,6 +192,7 @@ class VoissNotesApp(App):
         Binding("r", "commit_rewrite", "Rewrite", priority=True),
         Binding("space", "toggle_recording", "Record/Stop", priority=True),
         Binding("e", "edit_panel", "Edit", priority=True),
+        Binding("E", "edit_external", "Ext Edit", priority=True),
         Binding("escape", "escape_action", "Esc", priority=True),
         Binding("q", "quit_app", "Quit", priority=True),
         Binding("tab", "cycle_panel", "Tab", priority=True),
@@ -512,7 +513,7 @@ class VoissNotesApp(App):
             parts.append("^S Save  \u238b Cancel")
         else:
             parts.append(
-                "\u2423 Rec  \u21e5 Select  e Edit  \u23ce Raw  r Rewrite  \u238b Discard  q Quit"
+                "\u2423 Rec  \u21e5 Select  e Edit  E Ext Edit  \u23ce Raw  r Rewrite  \u238b Discard  q Quit"
             )
         bar.update(" ".join(parts))
 
@@ -731,6 +732,67 @@ class VoissNotesApp(App):
         container.border_subtitle = "^S Save  \u238b Cancel"
 
         self._update_status_bar()
+
+    def action_edit_external(self) -> None:
+        """Open focused panel content in $EDITOR."""
+        if self._editing:
+            self._insert_into_editor("E")
+            return
+        if self._selected_panel is None:
+            self.notify(
+                "Select a panel first (Tab or click)",
+                severity="warning",
+                timeout=2,
+            )
+            return
+        self.run_worker(self._edit_in_external_editor(), exclusive=True)
+
+    async def _edit_in_external_editor(self) -> None:
+        import os
+        import shlex
+        import subprocess
+        import tempfile
+
+        # Read current content from the selected panel
+        if self._selected_panel == "left":
+            content = self._read_left_panel()
+        else:
+            editor_widget = self.query_one("#output-editor", TextArea)
+            content = editor_widget.text
+
+        # Write to temp file
+        with tempfile.NamedTemporaryFile(
+            suffix=".md", mode="w", delete=False, prefix="voiss-"
+        ) as f:
+            f.write(content)
+            tmp_path = f.name
+
+        try:
+            editor_cmd = os.environ.get("EDITOR", "vi")
+            cmd_parts = shlex.split(editor_cmd)
+            cmd_parts.append(tmp_path)
+            with self.suspend():
+                subprocess.call(cmd_parts)
+            result = Path(tmp_path).read_text()
+        finally:
+            Path(tmp_path).unlink(missing_ok=True)
+
+        # Apply result back
+        if self._selected_panel == "left":
+            self._turn_accumulator.clear()
+            if result.strip():
+                self._turn_accumulator.append(result.strip())
+            self._current_partial = ""
+            self._current_transcript = ""
+            left_editor = self.query_one("#speech-editor", TextArea)
+            left_editor.text = result.strip()
+        else:
+            output_editor = self.query_one("#output-editor", TextArea)
+            output_editor.text = result
+            self._output_dirty = True
+            self._save_output_if_dirty()
+            md = self.query_one("#output-display", Markdown)
+            md.update(result)
 
     def action_save_edit(self) -> None:
         """Save edit and exit edit mode (Ctrl+S)."""
