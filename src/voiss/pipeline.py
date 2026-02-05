@@ -57,6 +57,7 @@ class RealtimeTranscriber:
         min_words: int = DEFAULT_MIN_WORDS,
         analyze: bool = False,
         llm_model: str | None = None,
+        analysis_prompt: str | None = None,
         device: int | None = None,
         no_ui: bool = False,
         context: str | None = None,
@@ -76,6 +77,7 @@ class RealtimeTranscriber:
         self.min_words = min_words
         self.analyze = analyze
         self.llm_model_name = llm_model or DEFAULT_LLM_MODEL
+        self.analysis_prompt = analysis_prompt
         self.device = device
         self.no_ui = no_ui
         self.energy_threshold = energy_threshold
@@ -204,6 +206,7 @@ class RealtimeTranscriber:
                     final_transcript,
                     self.llm,
                     self.llm_tokenizer,
+                    self.analysis_prompt,
                 )
                 self.ui_state.analysis_ms = (
                     time.perf_counter() - start

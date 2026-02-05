@@ -176,7 +176,7 @@ Notes mode uses a Textual full-screen TUI with manual commit workflow:
 
 **VAD + manual commit coexistence**: `_handle_turn_complete()` still fires on VAD silence (required for ASR buffer management), but the `on_turn_complete` callback only appends to an accumulator list — it does not auto-trigger rewrite. The user presses Enter or `r` when ready to commit.
 
-**Architecture**: The Textual app does NOT use `RealtimeTranscriber`. Instead, `notes.run_notes_pipeline()` loads the ASR model and runs warmup *before* Textual starts (subprocess-safe, fd-safe). Then Textual owns the terminal and event loop. The app directly manages `RingBuffer`, `VoiceActivityDetector`, `sd.InputStream`, and an `asyncio.Queue` — with a `_processor()` task running on Textual's own event loop. ASR inference uses Python-level `redirect_stdout`/`redirect_stderr` only (no `os.dup2`) to avoid fd conflicts with Textual's terminal rendering. Rewrite runs in a separate `@work(thread=True)` worker via `rewrite_transcript()`.
+**Architecture**: The Textual app does NOT use `RealtimeTranscriber`. Instead, `notes.run_notes_pipeline()` loads the ASR model and runs warmup *before* Textual starts (subprocess-safe, fd-safe). Then Textual owns the terminal and event loop. The app directly manages `RingBuffer`, `VoiceActivityDetector`, `sd.InputStream`, and an `asyncio.Queue` — with a `_processor()` task running on Textual's own event loop. ASR inference uses Python-level `redirect_stdout`/`redirect_stderr` only (no `os.dup2`) to avoid fd conflicts with Textual's terminal rendering. Post-processing runs in a separate `@work(thread=True)` worker via `postprocess_transcript()`.
 
 Output files are saved to `$VOISS_NOTES_DIR` (default `~/.local/share/voiss/notes/`) as timestamped markdown, or to a path specified by `--notes-file`. On rewrite failure, the raw transcript is preserved.
 
@@ -189,4 +189,4 @@ Output files are saved to `$VOISS_NOTES_DIR` (default `~/.local/share/voiss/note
 5. **TTY detection**: auto-disable Rich UI when stdout is piped; clean transcript lines only
 6. **Pre-load before TUI**: ASR model loaded + warmed up before Textual starts, avoiding subprocess/fd conflicts
 7. **Callback-based extension**: `on_turn_complete` callback on pipeline allows new features (webhooks) without subclassing
-7. **Error resilience in rewrite**: exceptions captured in `RewriteResult.error`, raw transcript preserved on failure
+7. **Error resilience in postprocess**: exceptions captured in `PostprocessResult.error`, raw transcript preserved on failure

@@ -18,8 +18,8 @@ DEFAULT_ENERGY_THRESHOLD: Final = 300.0
 # Notes pipeline
 DEFAULT_NOTES_DIR: Final = "~/.local/share/voiss/notes"
 DEFAULT_NOTES_DIR_ENV: Final = "VOISS_NOTES_DIR"
-DEFAULT_REWRITE_MAX_TOKENS: Final = 2048
-DEFAULT_REWRITE_SYSTEM_PROMPT: Final = (
+DEFAULT_POSTPROCESS_MAX_TOKENS: Final = 2048
+DEFAULT_POSTPROCESS_PROMPT: Final = (
     "Clean up the following speech transcript. Fix grammar, punctuation, and "
     "filler words. Keep the original meaning and wording intact — do not add "
     "commentary, interpretation, or new information. If the text contains a "
@@ -27,6 +27,7 @@ DEFAULT_REWRITE_SYSTEM_PROMPT: Final = (
     "Format as markdown. Reply with only the cleaned text, nothing else."
 )
 DEFAULT_CONFIG_DIR: Final = "~/.config/voiss"
+DEFAULT_CONFIG_DIR_ENV: Final = "VOISS_CONFIG_DIR"
 DEFAULT_CONFIG_FILE: Final = "config.json"
-DEFAULT_PROMPT_FILE: Final = "rewrite_prompt.md"
+DEFAULT_PROMPT_FILE: Final = "prompt.md"
 DEFAULT_CONTEXT_BIAS: Final = 5.0

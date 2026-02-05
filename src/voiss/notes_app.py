@@ -36,7 +36,7 @@ from voiss.constants import (
 )
 from voiss.notes import NotesConfig, append_raw, append_turn, write_session_header
 from voiss.protocols import FeatureExtractorLike, TokenizerLike
-from voiss.rewrite import RewriteResult, apply_vocab, rewrite_transcript
+from voiss.rewrite import PostprocessResult, apply_vocab, postprocess_transcript
 from voiss.transcribe import is_meaningful, transcribe
 
 # Maps selected panel name to (container id, editor id)
@@ -481,7 +481,7 @@ class VoissNotesApp(App):
             return
 
         transcript = self._current_transcript
-        vocab = self._notes_config.rewrite.vocab
+        vocab = self._notes_config.vocab
         if vocab:
             transcript = apply_vocab(transcript, vocab)
 
@@ -552,7 +552,7 @@ class VoissNotesApp(App):
             self._last_partial_raw = raw_partial
             self._last_partial_change = now
         elif now - self._last_partial_change >= 0.5 and raw_partial:
-            vocab = self._notes_config.rewrite.vocab
+            vocab = self._notes_config.vocab
             self._current_partial = (
                 apply_vocab(raw_partial, vocab) if vocab else raw_partial
             )
@@ -847,7 +847,7 @@ class VoissNotesApp(App):
             return
 
         # Apply vocab corrections (no LLM)
-        vocab = self._notes_config.rewrite.vocab
+        vocab = self._notes_config.vocab
         if vocab:
             combined = apply_vocab(combined, vocab)
 
@@ -871,10 +871,12 @@ class VoissNotesApp(App):
 
     @work(exclusive=True, thread=True)
     def _run_rewrite(self, text: str) -> None:
-        result = rewrite_transcript(text, self._notes_config.rewrite)
+        result = postprocess_transcript(
+            text, self._notes_config.postprocess, self._notes_config.vocab,
+        )
         self.call_from_thread(self._on_rewrite_done, result)
 
-    def _on_rewrite_done(self, result: RewriteResult) -> None:
+    def _on_rewrite_done(self, result: PostprocessResult) -> None:
         # Flush any pending user edits to file before appending
         self._save_output_if_dirty()
 
@@ -953,10 +955,10 @@ class VoissNotesApp(App):
         # Save any uncommitted left-panel text raw to file
         combined = self._read_left_panel()
         if combined:
-            result_rw = RewriteResult(
+            result_rw = PostprocessResult(
                 original=combined,
                 rewritten="",
-                model=self._notes_config.rewrite.model,
+                model=self._notes_config.postprocess.model or "",
                 error="uncommitted (quit)",
             )
             append_turn(self._notes_config.output_path, result_rw)

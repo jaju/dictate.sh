@@ -100,6 +100,11 @@ def _add_shared_stt_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--list-devices", action="store_true", help="List audio devices"
     )
+    parser.add_argument(
+        "--config-file",
+        default=None,
+        help="JSON config file (default: ~/.config/voiss/config.json)",
+    )
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -135,8 +140,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     _add_shared_stt_args(notes_parser)
     notes_parser.add_argument(
         "--rewrite-model",
-        required=True,
-        help="LLM model for rewriting (e.g., ollama/llama3.2, openai/gpt-4o-mini)",
+        default=None,
+        help="LLM model for rewriting (e.g., ollama/llama3.2, openai/gpt-4o-mini). "
+        "Falls back to litellm_postprocess.model in config.json.",
     )
     prompt_group = notes_parser.add_mutually_exclusive_group()
     prompt_group.add_argument(
@@ -154,12 +160,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=None,
         help="Output file path (default: auto-named in notes directory)",
     )
-    notes_parser.add_argument(
-        "--config-file",
-        default=None,
-        help="JSON config file (default: ~/.config/voiss/config.json)",
-    )
-
     return parser
 
 
@@ -213,15 +213,15 @@ def _run_transcribe(args: argparse.Namespace) -> int:
     from voiss.pipeline import RealtimeTranscriber
     from voiss.rewrite import load_config
 
-    voiss_config = load_config()
+    voiss_config = load_config(args.config_file)
     cli_context = _resolve_context(args)
-    context = _merge_context(cli_context, voiss_config.context_terms)
+    context = _merge_context(cli_context, voiss_config.asr.context_terms)
 
     # Logit bias: merge config bias terms with CLI context terms
-    bias_terms = list(voiss_config.bias_terms)
+    bias_terms = list(voiss_config.asr.logit_bias_terms)
     if cli_context:
         bias_terms.extend(t.strip() for t in cli_context.split(",") if t.strip())
-    bias_scale = args.context_bias if args.context_bias is not None else voiss_config.bias_scale
+    bias_scale = args.context_bias if args.context_bias is not None else voiss_config.asr.logit_bias_scale
 
     transcriber = RealtimeTranscriber(
         model_path=args.model,
@@ -233,6 +233,7 @@ def _run_transcribe(args: argparse.Namespace) -> int:
         min_words=args.min_words,
         analyze=args.analyze,
         llm_model=args.llm_model,
+        analysis_prompt=voiss_config.analysis.prompt,
         device=args.device,
         no_ui=args.no_ui,
         context=context,
@@ -248,14 +249,15 @@ def _run_transcribe(args: argparse.Namespace) -> int:
 
 def _run_notes(args: argparse.Namespace) -> int:
     """Run the notes pipeline (Textual TUI)."""
-    from voiss.constants import DEFAULT_REWRITE_SYSTEM_PROMPT
+    import dataclasses
+
     from voiss.notes import (
         NotesConfig,
         load_system_prompt,
         resolve_notes_path,
         run_notes_pipeline,
     )
-    from voiss.rewrite import RewriteConfig, load_config
+    from voiss.rewrite import load_config
 
     system_prompt = load_system_prompt(
         args.system_prompt,
@@ -264,24 +266,33 @@ def _run_notes(args: argparse.Namespace) -> int:
 
     voiss_config = load_config(args.config_file)
 
-    rewrite_config = RewriteConfig(
-        model=args.rewrite_model,
-        system_prompt=system_prompt or voiss_config.prompt_file_content or voiss_config.system_prompt or DEFAULT_REWRITE_SYSTEM_PROMPT,
-        vocab=voiss_config.replacements,
-    )
+    lpp = voiss_config.litellm_postprocess
+    if system_prompt:
+        lpp = dataclasses.replace(lpp, prompt=system_prompt)
+    if args.rewrite_model:
+        lpp = dataclasses.replace(lpp, model=args.rewrite_model)
+
+    if not lpp.model:
+        parser = build_arg_parser()
+        parser.error(
+            "no rewrite model specified — use --rewrite-model or set "
+            "litellm_postprocess.model in config.json"
+        )
+
     notes_config = NotesConfig(
-        rewrite=rewrite_config,
+        postprocess=lpp,
         output_path=resolve_notes_path(args.notes_file),
+        vocab=voiss_config.corrections,
     )
 
     cli_context = _resolve_context(args)
-    context = _merge_context(cli_context, voiss_config.context_terms)
+    context = _merge_context(cli_context, voiss_config.asr.context_terms)
 
     # Logit bias: merge config bias terms with CLI context terms
-    bias_terms = list(voiss_config.bias_terms)
+    bias_terms = list(voiss_config.asr.logit_bias_terms)
     if cli_context:
         bias_terms.extend(t.strip() for t in cli_context.split(",") if t.strip())
-    bias_scale = args.context_bias if args.context_bias is not None else voiss_config.bias_scale
+    bias_scale = args.context_bias if args.context_bias is not None else voiss_config.asr.logit_bias_scale
 
     run_notes_pipeline(
         model_path=args.model,

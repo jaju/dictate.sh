@@ -74,7 +74,7 @@ src/voiss/
     ring_buffer.py      — RingBuffer (mutable, perf-critical)
     vad.py              — VadConfig + VoiceActivityDetector
   analysis.py          — IntentResult + analyze_intent()
-  rewrite.py           — RewriteConfig + RewriteResult + rewrite_transcript()
+  rewrite.py           — LitellmPostprocessConfig + PostprocessResult + postprocess_transcript()
   notes.py             — NotesConfig + notes pipeline orchestrator + helpers
   notes_app.py         — Textual TUI for notes mode (manual commit workflow)
   ui.py                — UiState + pure render functions (transcription mode)

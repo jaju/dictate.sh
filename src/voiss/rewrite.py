@@ -1,121 +1,206 @@
-"""LLM-based rewriting of speech transcripts into structured markdown.
+"""LLM-based post-processing of speech transcripts into structured markdown.
 
 Uses litellm for provider-agnostic LLM access (Ollama, OpenAI, Claude, etc.).
-Supports a vocabulary correction dictionary applied before LLM rewriting.
+Supports a vocabulary correction dictionary applied before LLM post-processing.
 """
 
+from __future__ import annotations
+
 import json
+import logging
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from voiss.constants import (
+    DEFAULT_ASR_MODEL,
     DEFAULT_CONFIG_DIR,
+    DEFAULT_CONFIG_DIR_ENV,
     DEFAULT_CONFIG_FILE,
     DEFAULT_CONTEXT_BIAS,
+    DEFAULT_LLM_MODEL,
+    DEFAULT_POSTPROCESS_MAX_TOKENS,
+    DEFAULT_POSTPROCESS_PROMPT,
     DEFAULT_PROMPT_FILE,
-    DEFAULT_REWRITE_MAX_TOKENS,
-    DEFAULT_REWRITE_SYSTEM_PROMPT,
 )
+
+_log = logging.getLogger("speech")
+
+
+# ---------------------------------------------------------------------------
+# Nested config dataclasses
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class AsrConfig:
+    """ASR model settings and context biasing."""
+
+    model: str = DEFAULT_ASR_MODEL
+    context_terms: tuple[str, ...] = ()
+    logit_bias_terms: tuple[str, ...] = ()
+    logit_bias_scale: float = DEFAULT_CONTEXT_BIAS
+
+
+@dataclass(frozen=True, slots=True)
+class AnalysisConfig:
+    """Intent-analysis LLM settings."""
+
+    model: str = DEFAULT_LLM_MODEL
+    prompt: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class LitellmPostprocessConfig:
+    """LLM post-processing settings for transcript cleanup."""
+
+    model: str | None = None
+    prompt: str | None = None
+    max_tokens: int = DEFAULT_POSTPROCESS_MAX_TOKENS
+    flags: dict[str, Any] = field(default_factory=lambda: {"think": False})
 
 
 @dataclass(frozen=True, slots=True)
 class VoissConfig:
     """Top-level configuration loaded from ~/.config/voiss/config.json."""
 
-    context_terms: tuple[str, ...] = ()
-    replacements: dict[str, str] = field(default_factory=dict)
-    bias_terms: tuple[str, ...] = ()
-    bias_scale: float = DEFAULT_CONTEXT_BIAS
-    system_prompt: str | None = None
-    prompt_file_content: str | None = None
+    asr: AsrConfig = field(default_factory=AsrConfig)
+    analysis: AnalysisConfig = field(default_factory=AnalysisConfig)
+    corrections: dict[str, str] = field(default_factory=dict)
+    litellm_postprocess: LitellmPostprocessConfig = field(
+        default_factory=LitellmPostprocessConfig,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Config loading helpers
+# ---------------------------------------------------------------------------
+
+
+def _resolve_config_path(config_dir: Path, path_str: str) -> Path:
+    """Resolve a path relative to *config_dir*. Absolute paths used as-is."""
+    p = Path(path_str).expanduser()
+    if p.is_absolute():
+        return p
+    return config_dir / p
+
+
+def _resolve_prompt(
+    config_dir: Path, section: dict[str, Any], section_name: str,
+) -> str | None:
+    """Resolve ``prompt`` / ``prompt_file`` from a config section."""
+    prompt = section.get("prompt")
+    prompt_file = section.get("prompt_file")
+    if prompt and prompt_file:
+        _log.debug(
+            "Both 'prompt' and 'prompt_file' in %s; using 'prompt_file'",
+            section_name,
+        )
+    if prompt_file:
+        path = _resolve_config_path(config_dir, str(prompt_file))
+        return path.read_text().strip()
+    if prompt:
+        return str(prompt)
+    return None
+
+
+def _read_default_prompt_file(config_dir: Path) -> str | None:
+    """Fallback: read ``prompt.md`` from *config_dir* if it exists.
+
+    Falls back to ``rewrite_prompt.md`` for backward compatibility.
+    """
+    for name in (DEFAULT_PROMPT_FILE, "rewrite_prompt.md"):
+        path = config_dir / name
+        if path.exists():
+            return path.read_text().strip() or None
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Public loader
+# ---------------------------------------------------------------------------
 
 
 def load_config(path: str | None = None) -> VoissConfig:
     """Load voiss configuration from a JSON file.
 
-    Reads ``~/.config/voiss/config.json`` (or the path given).
-    The config file supports three optional subtrees::
-
-        {
-          "context": ["Kubernetes", "kubectl", "etcd"],
-          "replacements": {"kube cuddle": "kubectl"},
-          "bias": {"terms": ["kubectl", "etcd"], "scale": 5.0}
-        }
+    Reads ``~/.config/voiss/config.json`` (or *path*).  Supports the
+    ``VOISS_CONFIG_DIR`` environment variable to override the config
+    directory.  Relative ``prompt_file`` paths are resolved against the
+    config directory.
 
     Returns a default (empty) config if the file does not exist.
     """
-    config_dir = Path(DEFAULT_CONFIG_DIR).expanduser()
+    config_dir = Path(
+        os.environ.get(DEFAULT_CONFIG_DIR_ENV, "") or DEFAULT_CONFIG_DIR,
+    ).expanduser()
+    config_path = Path(path).expanduser() if path else config_dir / DEFAULT_CONFIG_FILE
 
-    if path is not None:
-        config_path = Path(path).expanduser()
-    else:
-        config_path = config_dir / DEFAULT_CONFIG_FILE
+    if not config_path.exists():
+        prompt = _read_default_prompt_file(config_dir)
+        if prompt:
+            return VoissConfig(
+                litellm_postprocess=LitellmPostprocessConfig(prompt=prompt),
+            )
+        return VoissConfig()
 
-    # Check for default prompt file (independent of config.json)
-    prompt_file = config_dir / DEFAULT_PROMPT_FILE
-    prompt_file_content: str | None = None
-    if prompt_file.exists():
-        prompt_file_content = prompt_file.read_text().strip() or None
+    with open(config_path) as f:
+        data = json.load(f)
 
-    if config_path.exists():
-        with open(config_path) as f:
-            data = json.load(f)
-        if not isinstance(data, dict):
-            return VoissConfig(prompt_file_content=prompt_file_content)
+    if not isinstance(data, dict):
+        prompt = _read_default_prompt_file(config_dir)
+        if prompt:
+            return VoissConfig(
+                litellm_postprocess=LitellmPostprocessConfig(prompt=prompt),
+            )
+        return VoissConfig()
 
-        # context — list of terms for ASR system prompt biasing
-        context_terms: tuple[str, ...] = ()
-        raw_context = data.get("context", [])
-        if isinstance(raw_context, list):
-            context_terms = tuple(str(t) for t in raw_context if t)
+    # -- audio.asr ---------------------------------------------------------
+    audio = data.get("audio", {})
+    asr_raw = audio.get("asr", {})
+    logit_bias_raw = asr_raw.get("logit_bias", {})
+    asr = AsrConfig(
+        model=asr_raw.get("model", DEFAULT_ASR_MODEL),
+        context_terms=tuple(str(t) for t in asr_raw.get("context", []) if t),
+        logit_bias_terms=tuple(str(t) for t in logit_bias_raw.get("terms", [])),
+        logit_bias_scale=float(logit_bias_raw.get("scale", DEFAULT_CONTEXT_BIAS)),
+    )
 
-        replacements = {}
-        raw_replacements = data.get("replacements", {})
-        if isinstance(raw_replacements, dict):
-            replacements = {str(k): str(v) for k, v in raw_replacements.items()}
+    # -- audio.analysis ----------------------------------------------------
+    analysis_raw = audio.get("analysis", {})
+    analysis = AnalysisConfig(
+        model=analysis_raw.get("model", DEFAULT_LLM_MODEL),
+        prompt=_resolve_prompt(config_dir, analysis_raw, "audio.analysis"),
+    )
 
-        bias_terms: tuple[str, ...] = ()
-        bias_scale = DEFAULT_CONTEXT_BIAS
-        raw_bias = data.get("bias", {})
-        if isinstance(raw_bias, dict):
-            raw_terms = raw_bias.get("terms", [])
-            if isinstance(raw_terms, list):
-                bias_terms = tuple(str(t) for t in raw_terms)
-            raw_scale = raw_bias.get("scale")
-            if isinstance(raw_scale, (int, float)):
-                bias_scale = float(raw_scale)
+    # -- audio.corrections -------------------------------------------------
+    corrections = dict(audio.get("corrections", {}))
 
-        raw_system_prompt = data.get("system_prompt")
-        system_prompt: str | None = (
-            str(raw_system_prompt) if isinstance(raw_system_prompt, str) else None
-        )
+    # -- litellm_postprocess -----------------------------------------------
+    lpp_raw = data.get("litellm_postprocess", {})
+    lpp_prompt = _resolve_prompt(config_dir, lpp_raw, "litellm_postprocess")
+    if lpp_prompt is None:
+        lpp_prompt = _read_default_prompt_file(config_dir)
+    lpp = LitellmPostprocessConfig(
+        model=lpp_raw.get("model"),
+        prompt=lpp_prompt,
+        max_tokens=int(lpp_raw.get("max_tokens", DEFAULT_POSTPROCESS_MAX_TOKENS)),
+        flags=dict(lpp_raw.get("flags", {"think": False})),
+    )
 
-        return VoissConfig(
-            context_terms=context_terms,
-            replacements=replacements,
-            bias_terms=bias_terms,
-            bias_scale=bias_scale,
-            system_prompt=system_prompt,
-            prompt_file_content=prompt_file_content,
-        )
-
-    return VoissConfig(prompt_file_content=prompt_file_content)
-
-
-@dataclass(frozen=True, slots=True)
-class RewriteConfig:
-    """Configuration for the rewrite pipeline."""
-
-    model: str
-    system_prompt: str = DEFAULT_REWRITE_SYSTEM_PROMPT
-    max_tokens: int = DEFAULT_REWRITE_MAX_TOKENS
-    vocab: dict[str, str] = field(default_factory=dict)
+    return VoissConfig(
+        asr=asr,
+        analysis=analysis,
+        corrections=corrections,
+        litellm_postprocess=lpp,
+    )
 
 
 @dataclass(frozen=True, slots=True)
-class RewriteResult:
-    """Immutable result of a rewrite operation."""
+class PostprocessResult:
+    """Immutable result of a post-processing operation."""
 
     original: str
     rewritten: str
@@ -135,8 +220,12 @@ def apply_vocab(text: str, vocab: dict[str, str]) -> str:
     return text
 
 
-def rewrite_transcript(text: str, config: RewriteConfig) -> RewriteResult:
-    """Rewrite a transcript turn into structured markdown via litellm.
+def postprocess_transcript(
+    text: str,
+    config: LitellmPostprocessConfig,
+    vocab: dict[str, str] | None = None,
+) -> PostprocessResult:
+    """Post-process a transcript turn into structured markdown via litellm.
 
     Applies vocabulary corrections before sending to the LLM.
 
@@ -145,34 +234,37 @@ def rewrite_transcript(text: str, config: RewriteConfig) -> RewriteResult:
     the notes pipeline is not in use.
 
     Exceptions are captured in *result.error* rather than raised so that
-    the notes pipeline continues writing even when a single rewrite fails.
+    the notes pipeline continues writing even when a single post-process fails.
     """
     from litellm import completion  # deferred import
 
-    # Apply vocabulary corrections before LLM rewrite.
-    if config.vocab:
-        text = apply_vocab(text, config.vocab)
+    model = config.model or ""
+
+    if vocab:
+        text = apply_vocab(text, vocab)
+
+    system_prompt = config.prompt or DEFAULT_POSTPROCESS_PROMPT
 
     try:
         response = completion(
-            model=config.model,
+            model=model,
             messages=[
-                {"role": "system", "content": config.system_prompt},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": text},
             ],
             max_tokens=config.max_tokens,
-            think=False,
+            **config.flags,
         )
         content = response.choices[0].message.content or ""
-        return RewriteResult(
+        return PostprocessResult(
             original=text,
             rewritten=content.strip(),
-            model=config.model,
+            model=model,
         )
     except Exception as exc:
-        return RewriteResult(
+        return PostprocessResult(
             original=text,
             rewritten="",
-            model=config.model,
+            model=model,
             error=str(exc),
         )

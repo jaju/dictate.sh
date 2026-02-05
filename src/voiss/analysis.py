@@ -32,16 +32,20 @@ def analyze_intent(
     text: str,
     llm: Any,
     llm_tokenizer: TokenizerLike,
+    prompt: str | None = None,
 ) -> IntentResult:
     """Analyze transcribed text for intent, entities, and action.
 
     Uses the provided LLM to generate a structured analysis.
+    *prompt* overrides the default ``INTENT_EXPLAIN_PROMPT`` when supplied
+    (must contain a ``{text}`` placeholder).
     Returns a frozen IntentResult with parsed fields.
     """
     from mlx_lm.generate import generate
 
+    template = prompt or INTENT_EXPLAIN_PROMPT
     messages = [
-        {"role": "user", "content": INTENT_EXPLAIN_PROMPT.format(text=text)}
+        {"role": "user", "content": template.format(text=text)}
     ]
     prompt = llm_tokenizer.apply_chat_template(
         messages, tokenize=False, add_generation_prompt=True

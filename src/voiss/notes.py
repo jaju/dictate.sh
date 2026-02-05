@@ -5,21 +5,22 @@ The ASR model is loaded before Textual starts to avoid subprocess/fd conflicts.
 """
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
 from voiss.constants import DEFAULT_MAX_BUFFER_SECONDS, DEFAULT_NOTES_DIR, DEFAULT_NOTES_DIR_ENV
 from voiss.env import LOGGER
-from voiss.rewrite import RewriteConfig, RewriteResult
+from voiss.rewrite import LitellmPostprocessConfig, PostprocessResult
 
 
 @dataclass(frozen=True, slots=True)
 class NotesConfig:
     """Configuration for a notes session."""
 
-    rewrite: RewriteConfig
+    postprocess: LitellmPostprocessConfig
     output_path: Path
+    vocab: dict[str, str] = field(default_factory=dict)
 
 
 def resolve_notes_path(notes_file: str | None) -> Path:
@@ -72,13 +73,13 @@ def append_raw(path: Path, text: str) -> None:
         f.flush()
 
 
-def append_turn(path: Path, result: RewriteResult) -> None:
-    """Append a rewritten turn to the notes file."""
+def append_turn(path: Path, result: PostprocessResult) -> None:
+    """Append a post-processed turn to the notes file."""
     with open(path, "a") as f:
         if result.error:
             f.write(f"{result.original}\n\n")
             LOGGER.warning(
-                "Rewrite failed: %s — raw transcript saved", result.error
+                "Postprocess failed: %s — raw transcript saved", result.error
             )
         else:
             f.write(f"{result.rewritten}\n\n")

@@ -38,7 +38,7 @@ Left panel edits update the in-memory accumulator (for correcting speech before
 commit). Right panel edits write back to the notes file.
 
 All processing runs locally on your Mac's GPU via MLX. No cloud required
-(unless you choose a cloud LLM for rewriting).
+(unless you choose a cloud LLM for post-processing).
 
 ```bash
 uv run voiss notes --rewrite-model ollama/llama3.2
@@ -51,7 +51,7 @@ uv run voiss notes --rewrite-model ollama/llama3.2
 - **Rendered markdown** — right panel displays notes as rendered markdown (switches to TextArea for editing)
 - Local, streaming ASR on Apple Silicon (MLX, Qwen3-ASR)
 - Voice activity detection (VAD) for automatic turn boundaries
-- **LLM rewriting** — each `r` commit cleaned up via any [litellm](https://docs.litellm.ai/docs/providers)-compatible model
+- **LLM post-processing** — each `r` commit cleaned up via any [litellm](https://docs.litellm.ai/docs/providers)-compatible model
 - **ASR context biasing** — supply domain vocabulary to improve transcription accuracy
 - Configurable system prompts for domain-specific output (SOAP notes, meeting minutes, etc.)
 - Also works as a **live transcription** pipe (`uv run voiss`)
@@ -86,7 +86,7 @@ uv run voiss notes --rewrite-model ollama/llama3.2 \
     --context "Kubernetes, kubectl, etcd, CoreDNS, Istio"
 ```
 
-With a custom system prompt for the rewriter:
+With a custom system prompt for post-processing:
 
 ```bash
 uv run voiss notes --rewrite-model ollama/llama3.2 \
@@ -127,6 +127,7 @@ uv run voiss notes --rewrite-model ollama/llama3.2 \
 | `--energy-threshold` | `300.0` | RMS energy gate for noise rejection |
 | `--device` | — | Audio input device index |
 | `--list-devices` | — | List audio input devices |
+| `--config-file` | `~/.config/voiss/config.json` | JSON config file for context, corrections, bias, and LLM settings |
 
 ### Transcription Mode (`voiss`)
 
@@ -140,11 +141,10 @@ uv run voiss notes --rewrite-model ollama/llama3.2 \
 
 | Option | Description |
 |--------|-------------|
-| `--rewrite-model` | **(required)** LLM model for rewriting (e.g., `ollama/llama3.2`) |
-| `--system-prompt` | System prompt to guide rewriting style |
+| `--rewrite-model` | **(required)** LLM model for post-processing (e.g., `ollama/llama3.2`). Falls back to `litellm_postprocess.model` in config. |
+| `--system-prompt` | System prompt to guide post-processing style |
 | `--system-prompt-file` | Path to file containing the system prompt |
 | `--notes-file` | Output file path (default: auto-named in notes directory) |
-| `--config-file` | JSON config file for context, replacements, and bias (default: `~/.config/voiss/config.json`) |
 
 Notes are saved to `$VOISS_NOTES_DIR` (default: `~/.local/share/voiss/notes/`) as
 timestamped markdown files. Use `--notes-file` to write to a specific path instead.
@@ -155,7 +155,7 @@ timestamped markdown files. Use `--notes-file` to write to a specific path inste
 |-----|--------|
 | `Space` | Start / stop recording |
 | `Enter` | Commit accumulated speech raw (with vocab corrections, no LLM) |
-| `r` | Commit with LLM rewrite |
+| `r` | Commit with LLM post-processing |
 | `e` | Enter edit mode on focused panel |
 | `E` | Open focused panel in `$EDITOR` (neovim, vim, etc.) |
 | `Escape` | Cancel edit (in edit mode) / Discard accumulated text (normal mode) |
@@ -215,11 +215,11 @@ uv run voiss --context-file ~/vocab/medical-terms.txt
 
 ### Default Prompt File
 
-Place a `rewrite_prompt.md` file in `~/.config/voiss/` to set a default system
-prompt for the rewrite LLM without needing CLI flags or JSON escaping:
+Place a `prompt.md` file in `~/.config/voiss/` to set a default system
+prompt for the post-processing LLM without needing CLI flags or JSON escaping:
 
 ```bash
-cat > ~/.config/voiss/rewrite_prompt.md << 'EOF'
+cat > ~/.config/voiss/prompt.md << 'EOF'
 You are a medical scribe. Format the transcript as SOAP notes:
 
 ## Subjective
@@ -229,47 +229,67 @@ You are a medical scribe. Format the transcript as SOAP notes:
 EOF
 ```
 
+For backward compatibility, `rewrite_prompt.md` is also recognized if `prompt.md`
+does not exist.
+
 The full priority chain for the system prompt (first match wins):
 
 1. `--system-prompt` / `--system-prompt-file` (CLI flags)
-2. `~/.config/voiss/rewrite_prompt.md` (default prompt file)
-3. `system_prompt` field in `config.json`
-4. Built-in default prompt
+2. `prompt_file` in config section (file path wins over inline `prompt` when both present)
+3. `prompt` field in `litellm_postprocess` config section
+4. `~/.config/voiss/prompt.md` (or `rewrite_prompt.md` fallback)
+5. Built-in default prompt
 
 ### Via Configuration File
 
-voiss loads configuration from `~/.config/voiss/config.json`. All sections are
-optional. A sample config for clinical notes is provided in
+voiss loads configuration from `~/.config/voiss/config.json` (override with
+`--config-file` or the `VOISS_CONFIG_DIR` env var). All sections are optional.
+A sample config for clinical notes is provided in
 [`examples/config.json`](examples/config.json).
 
 ```json
 {
-  "context": [
-    "acetaminophen", "ibuprofen", "metformin", "lisinopril",
-    "hypertension", "tachycardia", "echocardiogram",
-    "SOAP", "CBC", "MRI", "EKG"
-  ],
-  "replacements": {
-    "echo cardiogram": "echocardiogram",
-    "die a beat ease": "diabetes"
+  "audio": {
+    "asr": {
+      "context": [
+        "acetaminophen", "ibuprofen", "metformin", "lisinopril",
+        "hypertension", "tachycardia", "echocardiogram",
+        "SOAP", "CBC", "MRI", "EKG"
+      ],
+      "logit_bias": {
+        "terms": ["acetaminophen", "echocardiogram", "metformin"],
+        "scale": 5.0
+      }
+    },
+    "corrections": {
+      "echo cardiogram": "echocardiogram",
+      "die a beat ease": "diabetes"
+    }
   },
-  "bias": {
-    "terms": ["acetaminophen", "echocardiogram", "metformin"],
-    "scale": 5.0
+  "litellm_postprocess": {
+    "model": "ollama/llama3.2",
+    "prompt": "Clean up the transcript. Format as markdown.",
+    "max_tokens": 2048,
+    "flags": { "think": false }
   }
 }
 ```
 
 | Section | Purpose |
 |---------|---------|
-| **`context`** | Terms injected into the ASR system prompt for native SFT context biasing. This is the primary accuracy lever. |
-| **`replacements`** | Post-ASR regex find-and-replace (case-insensitive). Catches deterministic misrecognitions. |
-| **`bias.terms`** | Subset of terms whose subword tokens get additive logit bias during decoding. Reserve for the hardest words. |
-| **`bias.scale`** | Logit bias strength (default 5.0). Overridden by `--context-bias` on the CLI. |
+| **`audio.asr.context`** | Terms injected into the ASR system prompt for native SFT context biasing. This is the primary accuracy lever. |
+| **`audio.asr.logit_bias.terms`** | Subset of terms whose subword tokens get additive logit bias during decoding. Reserve for the hardest words. |
+| **`audio.asr.logit_bias.scale`** | Logit bias strength (default 5.0). Overridden by `--context-bias` on the CLI. |
+| **`audio.corrections`** | Post-ASR regex find-and-replace (case-insensitive). Catches deterministic misrecognitions. Applied during both raw and LLM commits. |
+| **`litellm_postprocess.model`** | Default LLM model for post-processing. Overridden by `--rewrite-model`. |
+| **`litellm_postprocess.prompt`** | Inline system prompt. Overridden by `prompt_file`, `--system-prompt`, or `prompt.md`. |
+| **`litellm_postprocess.prompt_file`** | Path to a prompt file (relative to config dir or absolute). Takes precedence over inline `prompt`. |
+| **`litellm_postprocess.max_tokens`** | Max tokens for the LLM response (default 2048). |
+| **`litellm_postprocess.flags`** | Extra keyword arguments passed to `litellm.completion()` (e.g., `{"think": false}`). |
 
 Config context terms and CLI `--context` terms are merged (config first, CLI appended).
 
-Context biasing works in both transcription and notes modes.
+Context biasing and `--config-file` work in both transcription and notes modes.
 
 ## Recommended Models
 
@@ -282,7 +302,7 @@ Context biasing works in both transcription and notes modes.
 | `mlx-community/Qwen3-ASR-0.6B-bf16` | Higher quality, more RAM |
 | `mlx-community/Qwen3-ASR-1.7B-8bit` | Higher quality, slower |
 
-### LLM for Notes Rewriting (via litellm)
+### LLM for Notes Post-Processing (via litellm)
 
 | Model | Backend | Notes |
 |-------|---------|-------|
@@ -315,7 +335,7 @@ tail -f ~/.local/share/voiss/notes/*.md
 - **No audio**: check mic permissions or try `--list-devices` + `--device`
 - **Buffer fills up too fast**: increase `--max-buffer` (default 30s) to allow longer speech before committing
 - **Laggy output**: reduce `--transcribe-interval`
-- **Notes rewrite failures**: check that your LLM backend is running (e.g., `ollama serve`). Raw transcripts are saved on rewrite failure.
+- **Notes post-processing failures**: check that your LLM backend is running (e.g., `ollama serve`). Raw transcripts are saved on failure.
 - **Domain words misrecognized**: use `--context` or `--context-file` with your vocabulary. If prompt biasing alone isn't enough, the logit bias (`--context-bias`) will increase token probabilities directly. Try values between 3.0-8.0. Too high (>10) may cause hallucination of biased terms.
 - **Bias causing wrong words**: lower `--context-bias` (try 2.0-3.0) or remove overly broad terms from config
 
