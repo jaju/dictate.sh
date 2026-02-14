@@ -16,9 +16,9 @@ def is_meaningful(text: str) -> bool:
     cleaned = re.sub(r"[^\w]", "", text)
     return len(cleaned) >= 2
 
-from voiss.model._utils import get_feat_extract_output_lengths
-from voiss.model.asr import Qwen3ASRModel
-from voiss.protocols import FeatureExtractorLike, TokenizerLike
+from voiss.core.model._utils import get_feat_extract_output_lengths
+from voiss.core.model.asr import Qwen3ASRModel
+from voiss.core.protocols import FeatureExtractorLike, TokenizerLike
 
 # Qwen3-ASR special token IDs that should never receive logit bias.
 _SPECIAL_TOKEN_IDS: frozenset[int] = frozenset(

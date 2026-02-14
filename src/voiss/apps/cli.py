@@ -13,7 +13,7 @@ import argparse
 import logging
 import os
 
-from voiss.constants import (
+from voiss.core.constants import (
     DEFAULT_ASR_MODEL,
     DEFAULT_ENERGY_THRESHOLD,
     DEFAULT_LANGUAGE,
@@ -210,8 +210,8 @@ def _run_transcribe(args: argparse.Namespace) -> int:
     """Run the original transcription pipeline."""
     import asyncio
 
-    from voiss.pipeline import RealtimeTranscriber
-    from voiss.rewrite import load_config
+    from voiss.apps.config import load_config
+    from voiss.apps.pipeline import RealtimeTranscriber
 
     voiss_config = load_config(args.config_file)
     cli_context = _resolve_context(args)
@@ -251,13 +251,13 @@ def _run_notes(args: argparse.Namespace) -> int:
     """Run the notes pipeline (Textual TUI)."""
     import dataclasses
 
-    from voiss.notes import (
+    from voiss.apps.config import load_config
+    from voiss.apps.notes import (
         NotesConfig,
         load_system_prompt,
         resolve_notes_path,
         run_notes_pipeline,
     )
-    from voiss.rewrite import load_config
 
     system_prompt = load_system_prompt(
         args.system_prompt,
@@ -316,7 +316,7 @@ def _run_notes(args: argparse.Namespace) -> int:
 def main() -> int:
     """CLI entry point. Returns exit code."""
     # Must run before any MLX imports.
-    from voiss.env import setup_environment
+    from voiss.core.env import setup_environment
 
     setup_environment()
 

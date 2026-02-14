@@ -11,7 +11,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from voiss.analysis import IntentResult
+from voiss.core.types import IntentResult
 
 
 @dataclass(slots=True)

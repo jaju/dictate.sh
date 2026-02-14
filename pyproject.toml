@@ -1,6 +1,6 @@
 [project]
 name = "voissistant"
-version = "0.2.0"
+version = "0.3.0"
 description = "Real-time speech-to-text for Apple Silicon using MLX"
 requires-python = ">=3.12"
 license = "MIT"
@@ -8,20 +8,21 @@ dependencies = [
   "mlx>=0.30.6",
   "mlx-lm>=0.30.6",
   "numpy>=2.0",
-  "sounddevice>=0.5",
   "transformers>=5.1.0",
   "huggingface-hub>=1.4.1",
-  "webrtcvad-wheels>=2.0.14",
-  "rich>=14.0",
-  "litellm>=1.81.8",
-  "textual>=1.0",
 ]
+
+[project.optional-dependencies]
+cli = ["sounddevice>=0.5", "webrtcvad-wheels>=2.0.14", "rich>=14.0"]
+notes = ["voissistant[cli]", "textual>=1.0", "litellm>=1.81.8"]
+all = ["voissistant[notes]"]
+dev = ["voissistant[all]", "pytest>=8.0"]
 
 [tool.uv]
 prerelease = "allow"
 
 [project.scripts]
-voiss = "voiss.cli:main"
+voiss = "voiss.apps.cli:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -29,3 +30,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/voiss"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

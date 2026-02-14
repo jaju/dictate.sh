@@ -27,18 +27,19 @@ from textual.events import Click
 from textual.screen import ModalScreen
 from textual.widgets import Header, ListItem, ListView, Markdown, Static, TextArea
 
+from voiss.apps.config import postprocess_transcript
+from voiss.apps.notes import NotesConfig, append_raw, append_turn, write_session_header
 from voiss.audio.ring_buffer import RingBuffer
 from voiss.audio.vad import VadConfig, VoiceActivityDetector
-from voiss.constants import (
+from voiss.core.constants import (
     DEFAULT_AUDIO_QUEUE_MAXSIZE,
     DEFAULT_ENERGY_THRESHOLD,
     DEFAULT_MAX_BUFFER_SECONDS,
     DEFAULT_SAMPLE_RATE,
 )
-from voiss.notes import NotesConfig, append_raw, append_turn, write_session_header
-from voiss.protocols import FeatureExtractorLike, TokenizerLike
-from voiss.rewrite import PostprocessResult, apply_vocab, postprocess_transcript
-from voiss.transcribe import is_meaningful, transcribe
+from voiss.core.protocols import FeatureExtractorLike, TokenizerLike
+from voiss.core.text import PostprocessResult, apply_vocab
+from voiss.core.transcribe import is_meaningful, transcribe
 
 # Maps selected panel name to (container id, editor id)
 _PANEL_IDS: dict[str, tuple[str, str]] = {

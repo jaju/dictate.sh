@@ -5,11 +5,11 @@ suggested actions using a small local LLM.
 """
 
 import re
-from dataclasses import dataclass
 from typing import Any, Final
 
-from voiss.env import suppress_output
-from voiss.protocols import TokenizerLike
+from voiss.core.env import suppress_output
+from voiss.core.protocols import TokenizerLike
+from voiss.core.types import IntentResult
 
 INTENT_EXPLAIN_PROMPT: Final = """Analyze this speech and respond with exactly 3 lines:
 INTENT: <primary intent in 2-3 words>
@@ -17,15 +17,6 @@ ENTITIES: <key items or names, comma-separated, or "none">
 ACTION: <what should happen next, one short sentence>
 
 Speech: "{text}" /no_think"""
-
-
-@dataclass(frozen=True, slots=True)
-class IntentResult:
-    """Immutable result of intent analysis."""
-
-    intent: str = ""
-    entities: str = ""
-    action: str = ""
 
 
 def analyze_intent(

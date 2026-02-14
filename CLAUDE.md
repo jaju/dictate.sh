@@ -49,35 +49,54 @@ See `ARCHITECTURE.md` for full technical details.
 - **Frozen dataclasses**: All config types are `@dataclass(frozen=True, slots=True)`
 - **Functional over OO**: Pure functions where state is not needed. Module-level functions over methods.
 - **Immutable over mutable**: `tuple` over `list` for fixed collections. Factory functions over `__post_init__` mutation.
-- **Dependencies**: mlx>=0.30.0, mlx-lm>=0.30.0, numpy>=2.0, rich>=14.0, webrtcvad-wheels>=2.0.14, litellm>=1.40, textual>=1.0
-- **Root `stt.py`**: Thin shim that imports from `voiss.cli`. No longer the full script.
+- **Core deps**: mlx>=0.30.6, mlx-lm>=0.30.6, numpy>=2.0, transformers>=5.1.0, huggingface-hub>=1.4.1
+- **Optional deps**: `cli` extra (sounddevice, webrtcvad-wheels, rich), `notes` extra (textual, litellm), `all` = everything
+- **Library-first**: `voiss.api` is the public API for programmatic use; `voiss.apps.cli` is the CLI entry point
 
-## File Layout (Target)
+## File Layout
 
 ```
 src/voiss/
-  __init__.py          — version only, no eager MLX imports
-  constants.py         — Final-annotated defaults
-  env.py               — setup_environment(), suppress_output(), LOGGER
-  protocols.py         — TokenizerLike, FeatureExtractorLike
-  config.py            — frozen dataclasses + make_model_config() factory
-  model/
-    __init__.py         — re-exports
-    _utils.py           — tensor math helpers
-    encoder.py          — audio encoder nn.Modules
-    decoder.py          — text decoder nn.Modules
-    asr.py              — Qwen3ASRModel composite
-    loader.py           — load_qwen3_asr()
-  transcribe.py        — transcribe() generator + is_meaningful() filter
-  audio/
-    __init__.py         — re-exports
-    ring_buffer.py      — RingBuffer (mutable, perf-critical)
-    vad.py              — VadConfig + VoiceActivityDetector
-  analysis.py          — IntentResult + analyze_intent()
-  rewrite.py           — LitellmPostprocessConfig + PostprocessResult + postprocess_transcript()
-  notes.py             — NotesConfig + notes pipeline orchestrator + helpers
-  notes_app.py         — Textual TUI for notes mode (manual commit workflow)
-  ui.py                — UiState + pure render functions (transcription mode)
-  pipeline.py          — RealtimeTranscriber (orchestration, on_turn_complete callback)
-  cli.py               — subcommands (bare transcribe + notes) + main()
+  __init__.py              — version + lazy __getattr__ for API re-exports
+  api.py                   — public API (AsrEngine, transcribe_file, etc.)
+  py.typed                 — PEP 561 marker
+
+  core/                    — inference-only, no UI deps
+    __init__.py            — re-exports key symbols
+    constants.py           — Final-annotated defaults
+    env.py                 — setup_environment(), suppress_output(), LOGGER
+    protocols.py           — TokenizerLike, FeatureExtractorLike
+    config.py              — frozen dataclasses + make_model_config() factory
+    text.py                — PostprocessResult + apply_vocab()
+    types.py               — IntentResult dataclass
+    transcribe.py          — transcribe() generator + is_meaningful() + build_logit_bias()
+    model/
+      __init__.py          — re-exports
+      _utils.py            — tensor math helpers
+      encoder.py           — audio encoder nn.Modules
+      decoder.py           — text decoder nn.Modules
+      asr.py               — Qwen3ASRModel composite
+      loader.py            — load_qwen3_asr()
+
+  audio/                   — shared audio utilities
+    __init__.py            — re-exports
+    ring_buffer.py         — RingBuffer (mutable, perf-critical, numpy only)
+    vad.py                 — VadConfig + VoiceActivityDetector (needs webrtcvad)
+
+  apps/                    — CLI/TUI/runtime orchestration
+    __init__.py
+    cli.py                 — subcommands (bare transcribe + notes) + main()
+    config.py              — VoissConfig, load_config, postprocess_transcript
+    analysis.py            — analyze_intent() (uses IntentResult from core.types)
+    pipeline.py            — RealtimeTranscriber (orchestration)
+    ui.py                  — UiState + pure render functions
+    notes.py               — NotesConfig + notes pipeline orchestrator
+    notes_app.py           — Textual TUI for notes mode
+
+tests/
+  conftest.py              — mock fixtures
+  test_api.py              — API stability tests
+  test_logit_bias.py       — logit bias building
+  test_text.py             — vocab correction + PostprocessResult
+  test_compat.py           — import path verification
 ```

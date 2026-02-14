@@ -1,7 +1,6 @@
-"""LLM-based post-processing of speech transcripts into structured markdown.
+"""Application-level configuration and LLM post-processing.
 
 Uses litellm for provider-agnostic LLM access (Ollama, OpenAI, Claude, etc.).
-Supports a vocabulary correction dictionary applied before LLM post-processing.
 """
 
 from __future__ import annotations
@@ -9,12 +8,11 @@ from __future__ import annotations
 import json
 import logging
 import os
-import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from voiss.constants import (
+from voiss.core.constants import (
     DEFAULT_ASR_MODEL,
     DEFAULT_CONFIG_DIR,
     DEFAULT_CONFIG_DIR_ENV,
@@ -25,6 +23,7 @@ from voiss.constants import (
     DEFAULT_POSTPROCESS_PROMPT,
     DEFAULT_PROMPT_FILE,
 )
+from voiss.core.text import apply_vocab
 
 _log = logging.getLogger("speech")
 
@@ -198,33 +197,11 @@ def load_config(path: str | None = None) -> VoissConfig:
     )
 
 
-@dataclass(frozen=True, slots=True)
-class PostprocessResult:
-    """Immutable result of a post-processing operation."""
-
-    original: str
-    rewritten: str
-    model: str
-    error: str = ""
-
-
-def apply_vocab(text: str, vocab: dict[str, str]) -> str:
-    """Apply vocabulary corrections to text.
-
-    Each key in *vocab* is matched as a case-insensitive whole word
-    and replaced with the corresponding value.
-    """
-    for wrong, correct in vocab.items():
-        pattern = re.compile(re.escape(wrong), re.IGNORECASE)
-        text = pattern.sub(correct, text)
-    return text
-
-
 def postprocess_transcript(
     text: str,
     config: LitellmPostprocessConfig,
     vocab: dict[str, str] | None = None,
-) -> PostprocessResult:
+) -> "PostprocessResult":
     """Post-process a transcript turn into structured markdown via litellm.
 
     Applies vocabulary corrections before sending to the LLM.
@@ -237,6 +214,8 @@ def postprocess_transcript(
     the notes pipeline continues writing even when a single post-process fails.
     """
     from litellm import completion  # deferred import
+
+    from voiss.core.text import PostprocessResult
 
     model = config.model or ""
 

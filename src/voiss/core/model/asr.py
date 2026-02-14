@@ -10,9 +10,9 @@ import mlx.core as mx
 import mlx.nn as nn
 import numpy as np
 
-from voiss.config import ModelConfig
-from voiss.model.decoder import TextModel
-from voiss.model.encoder import AudioEncoder
+from voiss.core.config import ModelConfig
+from voiss.core.model.decoder import TextModel
+from voiss.core.model.encoder import AudioEncoder
 
 type Weights = dict[str, mx.array]
 

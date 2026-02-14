@@ -9,9 +9,10 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from voiss.constants import DEFAULT_MAX_BUFFER_SECONDS, DEFAULT_NOTES_DIR, DEFAULT_NOTES_DIR_ENV
-from voiss.env import LOGGER
-from voiss.rewrite import LitellmPostprocessConfig, PostprocessResult
+from voiss.apps.config import LitellmPostprocessConfig
+from voiss.core.constants import DEFAULT_MAX_BUFFER_SECONDS, DEFAULT_NOTES_DIR, DEFAULT_NOTES_DIR_ENV
+from voiss.core.env import LOGGER
+from voiss.core.text import PostprocessResult
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,9 +112,9 @@ def run_notes_pipeline(
     import numpy as np
     from rich.console import Console
 
-    from voiss.env import suppress_output
-    from voiss.model import load_qwen3_asr
-    from voiss.transcribe import build_logit_bias, transcribe
+    from voiss.core.env import suppress_output
+    from voiss.core.model import load_qwen3_asr
+    from voiss.core.transcribe import build_logit_bias, transcribe
 
     console = Console(stderr=True)
 
@@ -141,7 +142,7 @@ def run_notes_pipeline(
     console.print("[green]Ready.[/green]")
 
     # Phase 3: Launch Textual (owns terminal from here)
-    from voiss.notes_app import VoissNotesApp
+    from voiss.apps.notes_app import VoissNotesApp
 
     app = VoissNotesApp(
         model=model,

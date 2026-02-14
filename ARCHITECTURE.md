@@ -104,28 +104,40 @@ Display Loop (async)
 - **Turn detection**: speech detected → silence frames counted → threshold → turn complete
 - **Minimum content filter**: regex-based meaningful check + min word count
 
-## Module Dependency Graph (Target)
+## Module Dependency Graph
+
+The codebase is split into three layers: `core/` (inference-only), `audio/` (shared), and `apps/` (CLI/TUI).
 
 ```
-constants          (no deps)
-env                (no deps)
-protocols          (numpy types)
-config             (no deps)
-model/_utils       (mlx)
-model/encoder      (mlx, numpy, config, model/_utils)
-model/decoder      (mlx, config, model/_utils)
-model/asr          (mlx, numpy, config, encoder, decoder)
-model/loader       (mlx, json, pathlib, hf_hub, transformers, config, asr, protocols)
-transcribe         (mlx, numpy, mlx_lm, model, protocols)
-audio/ring_buffer  (numpy)
-audio/vad          (numpy, webrtcvad)
-analysis           (re, mlx_lm, env, protocols)
-rewrite            (litellm, json, pathlib, constants)  — also VoissConfig + load_config()
-notes              (pathlib, numpy, rich, constants, env, model, transcribe, notes_app)
-notes_app          (textual, rich, asyncio, numpy, sounddevice, notes, rewrite, transcribe, audio)
-ui                 (rich, analysis)
-pipeline           (asyncio, numpy, sounddevice, rich, all voiss modules)
-cli                (argparse, constants, env, pipeline, notes, rewrite)
+voiss.core (no UI deps — safe for library consumers)
+├── core/constants      (no deps)
+├── core/env            (no deps)
+├── core/protocols      (numpy types)
+├── core/config         (no deps)
+├── core/types          (no deps)
+├── core/text           (re)
+├── core/model/_utils   (mlx)
+├── core/model/encoder  (mlx, numpy, core/config, core/model/_utils)
+├── core/model/decoder  (mlx, core/config, core/model/_utils)
+├── core/model/asr      (mlx, numpy, core/config, core/model/encoder, core/model/decoder)
+├── core/model/loader   (mlx, json, pathlib, hf_hub, transformers, core/config, core/model/asr, core/protocols)
+└── core/transcribe     (mlx, numpy, mlx_lm, core/model, core/protocols)
+
+voiss.audio (shared — mixed dep profile)
+├── audio/ring_buffer   (numpy only — importable with core deps)
+└── audio/vad           (numpy, webrtcvad — needs cli extra)
+
+voiss.apps (CLI/TUI — needs optional extras)
+├── apps/config         (litellm, json, pathlib, core/constants, core/text)
+├── apps/analysis       (re, mlx_lm, core/env, core/protocols, core/types)
+├── apps/ui             (rich, core/types)
+├── apps/notes          (pathlib, core/constants, core/env, core/text, apps/config)
+├── apps/notes_app      (textual, asyncio, numpy, sounddevice, apps/config, apps/notes, audio, core)
+├── apps/pipeline       (asyncio, numpy, sounddevice, rich, apps/analysis, apps/ui, audio, core)
+└── apps/cli            (argparse, apps/config, apps/pipeline, apps/notes, core/constants, core/env)
+
+voiss.api (public API — deferred MLX imports)
+└── api                 (wave, struct, time, core/constants, core/transcribe)
 ```
 
 No circular dependencies. Strictly bottom-up.

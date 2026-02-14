@@ -19,10 +19,11 @@ import sounddevice as sd
 from rich.console import Console
 from rich.live import Live
 
-from voiss.analysis import IntentResult, analyze_intent
+from voiss.apps.analysis import analyze_intent
+from voiss.apps.ui import UiState, render_layout
 from voiss.audio.ring_buffer import RingBuffer
 from voiss.audio.vad import VadConfig, VoiceActivityDetector
-from voiss.constants import (
+from voiss.core.constants import (
     DEFAULT_ASR_MODEL,
     DEFAULT_AUDIO_QUEUE_MAXSIZE,
     DEFAULT_ENERGY_THRESHOLD,
@@ -36,11 +37,11 @@ from voiss.constants import (
     DEFAULT_VAD_MODE,
     DEFAULT_VAD_SILENCE_MS,
 )
-from voiss.env import LOGGER, suppress_output
-from voiss.model import load_qwen3_asr
-from voiss.protocols import FeatureExtractorLike, TokenizerLike
-from voiss.transcribe import build_logit_bias, is_meaningful, transcribe
-from voiss.ui import UiState, render_layout
+from voiss.core.env import LOGGER, suppress_output
+from voiss.core.model import load_qwen3_asr
+from voiss.core.protocols import FeatureExtractorLike, TokenizerLike
+from voiss.core.transcribe import build_logit_bias, is_meaningful, transcribe
+from voiss.core.types import IntentResult
 
 
 class RealtimeTranscriber:

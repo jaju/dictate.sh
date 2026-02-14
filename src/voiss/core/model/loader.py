@@ -7,9 +7,9 @@ from pathlib import Path
 import mlx.core as mx
 import mlx.nn as nn
 
-from voiss.config import make_model_config
-from voiss.model.asr import Qwen3ASRModel
-from voiss.protocols import FeatureExtractorLike, TokenizerLike
+from voiss.core.config import make_model_config
+from voiss.core.model.asr import Qwen3ASRModel
+from voiss.core.protocols import FeatureExtractorLike, TokenizerLike
 
 
 def load_qwen3_asr(

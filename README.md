@@ -44,6 +44,50 @@ All processing runs locally on your Mac's GPU via MLX. No cloud required
 uv run voiss notes --rewrite-model ollama/llama3.2
 ```
 
+## Use as a Library
+
+voiss can be installed as a Python dependency for ASR inference on Apple Silicon,
+without pulling in any CLI/TUI/audio-capture dependencies.
+
+### Install (core only — model loading + file transcription)
+
+```bash
+pip install "voissistant @ git+https://github.com/jaju/dictate.sh.git"
+```
+
+### Install with all features (CLI + notes TUI)
+
+```bash
+pip install "voissistant[all] @ git+https://github.com/jaju/dictate.sh.git"
+```
+
+### Quick example
+
+```python
+from voiss import load_asr_model, transcribe_file, TranscribeOptions, build_logit_bias
+
+engine = load_asr_model()
+result = transcribe_file(engine, "meeting.wav")
+print(result.text)
+
+# With domain vocabulary biasing
+bias = build_logit_bias(["Kubernetes", "kubectl"], engine.tokenizer, scale=5.0)
+result = transcribe_file(engine, "meeting.wav", TranscribeOptions(
+    context="Kubernetes, kubectl, etcd, pod",
+    logit_bias=bias,
+))
+```
+
+## Architecture
+
+The codebase is split into three layers:
+
+- **`voiss.core`** — Pure inference: model loading, transcription, config. No UI or audio-capture deps. Safe to import in library mode.
+- **`voiss.audio`** — Ring buffer (numpy-only) and VAD (needs webrtcvad). Shared between CLI modes.
+- **`voiss.apps`** — CLI, TUI, pipeline orchestration. Depends on sounddevice, rich, textual, litellm.
+
+The public API lives in `voiss.api` and is re-exported via `voiss.__init__` for convenience.
+
 ## Features
 
 - **Full-screen notes TUI** — two-panel Textual interface with push-to-record workflow and modal editing
