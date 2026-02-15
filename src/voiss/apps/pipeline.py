@@ -7,11 +7,11 @@ transcribe, analyze_intent, ui render functions).
 
 import asyncio
 import io
-import re
 import shutil
 import signal
 import sys
 import time
+from collections.abc import Callable
 from typing import Any
 
 import numpy as np
@@ -19,12 +19,14 @@ import sounddevice as sd
 from rich.console import Console
 from rich.live import Live
 
-from dictate.analysis import IntentResult, analyze_intent
-from dictate.audio.ring_buffer import RingBuffer
-from dictate.audio.vad import VadConfig, VoiceActivityDetector
-from dictate.constants import (
+from voiss.apps.analysis import analyze_intent
+from voiss.apps.ui import UiState, render_layout
+from voiss.audio.ring_buffer import RingBuffer
+from voiss.audio.vad import VadConfig, VoiceActivityDetector
+from voiss.core.constants import (
     DEFAULT_ASR_MODEL,
     DEFAULT_AUDIO_QUEUE_MAXSIZE,
+    DEFAULT_ENERGY_THRESHOLD,
     DEFAULT_LANGUAGE,
     DEFAULT_LLM_MODEL,
     DEFAULT_MAX_BUFFER_SECONDS,
@@ -35,17 +37,11 @@ from dictate.constants import (
     DEFAULT_VAD_MODE,
     DEFAULT_VAD_SILENCE_MS,
 )
-from dictate.env import LOGGER, suppress_output
-from dictate.model import load_qwen3_asr
-from dictate.protocols import FeatureExtractorLike, TokenizerLike
-from dictate.transcribe import transcribe
-from dictate.ui import UiState, render_layout
-
-
-def is_meaningful(text: str) -> bool:
-    """Filter out noise so we do not finalize junk output."""
-    cleaned = re.sub(r"[^\w]", "", text)
-    return len(cleaned) >= 2
+from voiss.core.env import LOGGER, suppress_output
+from voiss.core.model import load_qwen3_asr
+from voiss.core.protocols import FeatureExtractorLike, TokenizerLike
+from voiss.core.transcribe import build_logit_bias, is_meaningful, transcribe
+from voiss.core.types import IntentResult
 
 
 class RealtimeTranscriber:
@@ -62,17 +58,31 @@ class RealtimeTranscriber:
         min_words: int = DEFAULT_MIN_WORDS,
         analyze: bool = False,
         llm_model: str | None = None,
+        analysis_prompt: str | None = None,
         device: int | None = None,
         no_ui: bool = False,
+        context: str | None = None,
+        on_turn_complete: Callable[[str], Any] | None = None,
+        energy_threshold: float = DEFAULT_ENERGY_THRESHOLD,
+        bias_terms: tuple[str, ...] = (),
+        context_bias: float | None = None,
+        max_buffer_seconds: int = DEFAULT_MAX_BUFFER_SECONDS,
     ) -> None:
         self.model_path = model_path
         self.language = language
         self.transcribe_interval = transcribe_interval
+        self.context = context
+        self.on_turn_complete = on_turn_complete
+        self.bias_terms = bias_terms
+        self.context_bias = context_bias
         self.min_words = min_words
         self.analyze = analyze
         self.llm_model_name = llm_model or DEFAULT_LLM_MODEL
+        self.analysis_prompt = analysis_prompt
         self.device = device
         self.no_ui = no_ui
+        self.energy_threshold = energy_threshold
+        self.max_buffer_seconds = max_buffer_seconds
         self.sample_rate = DEFAULT_SAMPLE_RATE
 
         self.audio_queue: asyncio.Queue[np.ndarray] = asyncio.Queue(
@@ -84,12 +94,13 @@ class RealtimeTranscriber:
         self.model: Any = None
         self.tokenizer: TokenizerLike | None = None
         self.feature_extractor: FeatureExtractorLike | None = None
+        self.logit_bias: dict[int, float] | None = None
         self.llm: Any = None
         self.llm_tokenizer: TokenizerLike | None = None
 
         # Audio components
         self.ring_buffer = RingBuffer.create(
-            DEFAULT_MAX_BUFFER_SECONDS, self.sample_rate
+            self.max_buffer_seconds, self.sample_rate
         )
         self.vad = VoiceActivityDetector(
             VadConfig(
@@ -104,6 +115,7 @@ class RealtimeTranscriber:
         # Concurrency
         self.buffer_lock = asyncio.Lock()
         self.gpu_lock = asyncio.Lock()
+        self.stop_event: asyncio.Event | None = None
 
         # Transcript state
         self.current_transcript = ""
@@ -119,6 +131,7 @@ class RealtimeTranscriber:
             llm_model_name=self.llm_model_name,
             analyze_enabled=analyze,
         )
+        self.stream: sd.InputStream | None = None
         self.console_out = Console()
         self.console_ui = Console(stderr=True, force_terminal=True)
         self.live: Live | None = None
@@ -162,6 +175,8 @@ class RealtimeTranscriber:
                 self.feature_extractor,
                 audio,
                 self.language,
+                context=self.context,
+                logit_bias=self.logit_bias,
             ):
                 parts.append(token)
         return "".join(parts).strip()
@@ -192,12 +207,17 @@ class RealtimeTranscriber:
                     final_transcript,
                     self.llm,
                     self.llm_tokenizer,
+                    self.analysis_prompt,
                 )
                 self.ui_state.analysis_ms = (
                     time.perf_counter() - start
                 ) * 1000
 
         self.pending_analysis = (final_transcript, analysis_result)
+
+        if self.on_turn_complete is not None:
+            await self.on_turn_complete(final_transcript)
+
         self.last_transcript = final_transcript
         self.current_transcript = ""
         self.ui_state.status = "Listening"
@@ -226,6 +246,11 @@ class RealtimeTranscriber:
                 pass
 
             if frame is not None:
+                # RMS energy gate — skip near-silent frames before VAD
+                rms = np.sqrt(np.mean(frame.astype(np.float32) ** 2))
+                if rms < self.energy_threshold:
+                    continue
+
                 async with self.buffer_lock:
                     self.ring_buffer.append(frame)
                     turn_complete = self.vad.process(frame)
@@ -246,7 +271,7 @@ class RealtimeTranscriber:
                 if samples_since >= min_new_samples:
                     async with self.buffer_lock:
                         audio_int16 = self.ring_buffer.get_recent(
-                            DEFAULT_MAX_BUFFER_SECONDS
+                            self.max_buffer_seconds
                         )
 
                     if audio_int16.size >= int(self.sample_rate * 0.3):
@@ -370,6 +395,12 @@ class RealtimeTranscriber:
             await asyncio.to_thread(load_qwen3_asr, self.model_path)
         )
 
+        # Build logit bias dict from bias terms (requires tokenizer)
+        if self.bias_terms and self.context_bias:
+            self.logit_bias = build_logit_bias(
+                self.bias_terms, self.tokenizer, self.context_bias
+            )
+
         # Prime caches and trigger one-time warnings off-screen.
         def warmup() -> None:
             old_stderr = sys.stderr
@@ -386,6 +417,8 @@ class RealtimeTranscriber:
                         self.feature_extractor,
                         dummy_audio,
                         self.language,
+                        context=self.context,
+                        logit_bias=self.logit_bias,
                     )
                 )
             finally:
@@ -414,6 +447,7 @@ class RealtimeTranscriber:
             callback=self._audio_callback,
             **stream_kwargs,
         )
+        self.stream = stream
 
         info = (
             f"Language: {self.language} | "
@@ -428,19 +462,19 @@ class RealtimeTranscriber:
 
         stream.start()
 
-        tasks = [
-            asyncio.create_task(self._processor()),
-            asyncio.create_task(self._display()),
-        ]
+        tasks = [asyncio.create_task(self._processor())]
+        tasks.append(asyncio.create_task(self._display()))
 
         stop_event = asyncio.Event()
+        self.stop_event = stop_event
+
+        signal_handler_installed = False
 
         def signal_handler() -> None:
             if not stop_event.is_set():
                 self._log_info("Stopping...")
                 stop_event.set()
 
-        signal_handler_installed = False
         try:
             self.loop.add_signal_handler(signal.SIGINT, signal_handler)
             signal_handler_installed = True

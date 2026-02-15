@@ -2,7 +2,7 @@
 
 ## Overview
 
-dictate.sh is a real-time speech-to-text transcription tool for Apple Silicon Macs. It captures microphone audio, detects speech boundaries via VAD, transcribes using a local ASR model (Qwen3-ASR) running on MLX, and optionally analyzes intent with a small local LLM.
+voissistant is a real-time speech-to-text tool and voice-driven notes system for Apple Silicon Macs. It captures microphone audio, detects speech boundaries via VAD, transcribes using a local ASR model (Qwen3-ASR) running on MLX, and supports two modes: live transcription (with optional intent analysis) and notes mode (LLM-rewritten markdown notes via litellm).
 
 ## Technology Stack
 
@@ -15,7 +15,9 @@ dictate.sh is a real-time speech-to-text transcription tool for Apple Silicon Ma
 | VAD | webrtcvad-wheels | >=2.0.14 | Voice activity detection |
 | Feature Extraction | transformers (Whisper) | >=4.47 | Mel-spectrogram (128 bins) |
 | Model Hub | huggingface-hub | >=0.27 | Model download + caching |
+| LLM Gateway | litellm | >=1.40 | Provider-agnostic LLM access (Ollama, OpenAI, etc.) |
 | Terminal UI | Rich | >=14.0 | Live panels, tables, styled text |
+| Notes TUI | Textual | >=1.0 | Full-screen TUI for notes mode |
 | Numerics | NumPy | >=2.0 | Audio buffers, array ops |
 | Runtime | Python | >=3.12 | Modern type syntax, slots |
 
@@ -37,6 +39,7 @@ Processor Loop (async)
         ├─ WhisperFeatureExtractor → mel spectrogram
         ├─ AudioEncoder        — conv downsample + transformer
         ├─ Token generation    — streaming via generate_step
+        │   └─ logit_bias?     — additive bias on domain token logits
         └─ Update transcript
     │
     ▼ (on turn complete)
@@ -79,7 +82,9 @@ Display Loop (async)
   - `<|audio_start|>` / `<|audio_end|>` — audio boundary markers
   - `<|audio_pad|>` (id=151676) — placeholder for audio features
   - EOS tokens: 151645, 151643
-- Chat template format: `<|im_start|>system\n<|im_end|>\n<|im_start|>user\n<|audio_start|>...<|audio_end|><|im_end|>\n<|im_start|>assistant\nlanguage English<asr_text>`
+- Chat template format: `<|im_start|>system\n{context}<|im_end|>\n<|im_start|>user\n<|audio_start|>...<|audio_end|><|im_end|>\n<|im_start|>assistant\nlanguage English<asr_text>`
+- **Context biasing (native SFT)**: The system prompt accepts domain vocabulary text that biases the decoder toward specific terms. This is a **native Qwen3-ASR capability trained during supervised fine-tuning** — the model was explicitly taught to attend to system prompt vocabulary during decoding. It is not a post-processing hack. Exposed via `--context` / `--context-file` CLI flags and the `context` list in `config.json`.
+- **Logit biasing (mechanical)**: Optionally, `--context-bias` enables additive logit biasing on subword tokens of context terms via `mlx_lm.sample_utils.make_logits_processors()`. This is a separate, cruder mechanism that directly increases token probabilities regardless of acoustic evidence. Useful as a supplementary nudge for stubborn misrecognitions, but not a substitute for the native SFT biasing.
 
 ## Concurrency Model
 
@@ -87,7 +92,9 @@ Display Loop (async)
 - **GPU lock** (`asyncio.Lock`): MLX is not re-entrant; serialize all GPU calls
 - **Buffer lock** (`asyncio.Lock`): protects ring buffer during concurrent read/write
 - **Audio callback**: runs on sounddevice thread, uses `call_soon_threadsafe` to enqueue
-- **`asyncio.to_thread`**: offloads blocking model calls (transcribe, analyze) to thread pool
+- **`asyncio.to_thread`**: offloads blocking model calls (transcribe, analyze, rewrite) to thread pool
+- **Turn callback**: `on_turn_complete` async callback on RealtimeTranscriber fires after each finalized turn (live transcription mode)
+- **Notes TUI isolation**: `notes_app.py` does not depend on `pipeline.py` — it directly uses the same building blocks (RingBuffer, VAD, transcribe) with Textual managing the lifecycle
 
 ## Audio Processing Details
 
@@ -97,28 +104,93 @@ Display Loop (async)
 - **Turn detection**: speech detected → silence frames counted → threshold → turn complete
 - **Minimum content filter**: regex-based meaningful check + min word count
 
-## Module Dependency Graph (Target)
+## Module Dependency Graph
+
+The codebase is split into three layers: `core/` (inference-only), `audio/` (shared), and `apps/` (CLI/TUI).
 
 ```
-constants          (no deps)
-env                (no deps)
-protocols          (numpy types)
-config             (no deps)
-model/_utils       (mlx)
-model/encoder      (mlx, numpy, config, model/_utils)
-model/decoder      (mlx, config, model/_utils)
-model/asr          (mlx, numpy, config, encoder, decoder)
-model/loader       (mlx, json, pathlib, hf_hub, transformers, config, asr, protocols)
-transcribe         (mlx, numpy, mlx_lm, model, protocols)
-audio/ring_buffer  (numpy)
-audio/vad          (numpy, webrtcvad)
-analysis           (re, mlx_lm, env, protocols)
-ui                 (rich, analysis)
-pipeline           (asyncio, numpy, sounddevice, rich, all dictate modules)
-cli                (argparse, asyncio, sounddevice, rich, constants, env, pipeline)
+voiss.core (no UI deps — safe for library consumers)
+├── core/constants      (no deps)
+├── core/env            (no deps)
+├── core/protocols      (numpy types)
+├── core/config         (no deps)
+├── core/types          (no deps)
+├── core/text           (re)
+├── core/model/_utils   (mlx)
+├── core/model/encoder  (mlx, numpy, core/config, core/model/_utils)
+├── core/model/decoder  (mlx, core/config, core/model/_utils)
+├── core/model/asr      (mlx, numpy, core/config, core/model/encoder, core/model/decoder)
+├── core/model/loader   (mlx, json, pathlib, hf_hub, transformers, core/config, core/model/asr, core/protocols)
+└── core/transcribe     (mlx, numpy, mlx_lm, core/model, core/protocols)
+
+voiss.audio (shared — mixed dep profile)
+├── audio/ring_buffer   (numpy only — importable with core deps)
+└── audio/vad           (numpy, webrtcvad — needs cli extra)
+
+voiss.apps (CLI/TUI — needs optional extras)
+├── apps/config         (litellm, json, pathlib, core/constants, core/text)
+├── apps/analysis       (re, mlx_lm, core/env, core/protocols, core/types)
+├── apps/ui             (rich, core/types)
+├── apps/notes          (pathlib, core/constants, core/env, core/text, apps/config)
+├── apps/notes_app      (textual, asyncio, numpy, sounddevice, apps/config, apps/notes, audio, core)
+├── apps/pipeline       (asyncio, numpy, sounddevice, rich, apps/analysis, apps/ui, audio, core)
+└── apps/cli            (argparse, apps/config, apps/pipeline, apps/notes, core/constants, core/env)
+
+voiss.api (public API — deferred MLX imports)
+└── api                 (wave, struct, time, core/constants, core/transcribe)
 ```
 
 No circular dependencies. Strictly bottom-up.
+
+## Notes Pipeline
+
+The notes mode (`voiss notes`) uses a four-layer pipeline for domain-accurate structured notes:
+
+```
+Layer 1: ASR Context Biasing — native SFT (primary)
+    config.json → "context": ["Kubernetes", "etcd", "CoreDNS"]
+    --context "kubectl, Istio"  (merged with config terms)
+    → injected into Qwen3-ASR system prompt as vocabulary hint
+    → model was trained during SFT to attend to these terms
+    → the primary mechanism for domain vocabulary accuracy
+
+Layer 2: ASR Logit Biasing — mechanical (supplementary)
+    config.json → "bias": {"terms": ["kubectl"], "scale": 5.0}
+    --context-bias 4.0  (overrides config scale)
+    → context terms tokenized → subword token IDs → additive logit bias
+    → mlx_lm.sample_utils.make_logits_processors() → generate_step()
+    → blunt force: increases token probability regardless of acoustics
+    → use sparingly for terms that SFT biasing alone doesn't fix
+
+Layer 3: Post-ASR Replacements
+    config.json → "replacements": {"kube cuddle": "kubectl"}
+    → regex find-and-replace after transcription, before LLM rewrite
+    → catches deterministic ASR failure patterns
+
+Layer 4: LLM Rewriting
+    --rewrite-model ollama/llama3.2
+    --system-prompt "Format as SOAP notes"
+    → each finalized turn sent to external LLM via litellm
+    → returns structured markdown appended to session file
+```
+
+### Textual TUI (notes_app.py)
+
+Notes mode uses a Textual full-screen TUI with manual commit workflow:
+
+- **Left panel** (40%): debounced, vocab-corrected transcript. VAD turns accumulate here across silence boundaries.
+- **Right panel** (60%): Markdown widget showing rendered notes in display mode, TextArea for editing. CSS toggles visibility based on `-editing` class.
+- **Footer**: live pipeline state (VAD, buffer, ASR latency, turn count) + key bindings.
+
+**Key bindings**: Space starts/stops recording (push-to-record), Enter commits raw (with vocab corrections), `r` commits with LLM rewrite, q quits (saving uncommitted text raw).
+
+**Dual commit modes**: Enter appends vocab-corrected text directly to the notes file (fast, no LLM). `r` runs the text through the configured LLM for cleanup before appending. Both modes clear the left panel, reset audio state, and reload the right panel.
+
+**VAD + manual commit coexistence**: `_handle_turn_complete()` still fires on VAD silence (required for ASR buffer management), but the `on_turn_complete` callback only appends to an accumulator list — it does not auto-trigger rewrite. The user presses Enter or `r` when ready to commit.
+
+**Architecture**: The Textual app does NOT use `RealtimeTranscriber`. Instead, `notes.run_notes_pipeline()` loads the ASR model and runs warmup *before* Textual starts (subprocess-safe, fd-safe). Then Textual owns the terminal and event loop. The app directly manages `RingBuffer`, `VoiceActivityDetector`, `sd.InputStream`, and an `asyncio.Queue` — with a `_processor()` task running on Textual's own event loop. ASR inference uses Python-level `redirect_stdout`/`redirect_stderr` only (no `os.dup2`) to avoid fd conflicts with Textual's terminal rendering. Post-processing runs in a separate `@work(thread=True)` worker via `postprocess_transcript()`.
+
+Output files are saved to `$VOISS_NOTES_DIR` (default `~/.local/share/voiss/notes/`) as timestamped markdown, or to a path specified by `--notes-file`. On rewrite failure, the raw transcript is preserved.
 
 ## Key Patterns
 
@@ -127,3 +199,6 @@ No circular dependencies. Strictly bottom-up.
 3. **Streaming generation**: `generate_step` yields tokens one at a time for low-latency display
 4. **Warmup**: dummy audio transcription on startup primes JIT caches and triggers one-time warnings off-screen
 5. **TTY detection**: auto-disable Rich UI when stdout is piped; clean transcript lines only
+6. **Pre-load before TUI**: ASR model loaded + warmed up before Textual starts, avoiding subprocess/fd conflicts
+7. **Callback-based extension**: `on_turn_complete` callback on pipeline allows new features (webhooks) without subclassing
+7. **Error resilience in postprocess**: exceptions captured in `PostprocessResult.error`, raw transcript preserved on failure

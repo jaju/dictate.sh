@@ -1,0 +1,36 @@
+{
+  "audio": {
+    "asr": {
+      "context": [
+        "acetaminophen", "ibuprofen", "metformin", "lisinopril", "amoxicillin",
+        "atorvastatin", "omeprazole", "levothyroxine", "prednisone",
+        "hypertension", "hypotension", "tachycardia", "bradycardia",
+        "diabetes", "hypothyroidism", "hyperlipidemia",
+        "echocardiogram", "colonoscopy", "endoscopy", "spirometry",
+        "thoracic", "lumbar", "cervical", "bilateral",
+        "SOAP", "CBC", "MRI", "CT", "EKG", "ICU", "BMI",
+        "systolic", "diastolic", "milligrams"
+      ],
+      "logit_bias": {
+        "terms": [
+          "acetaminophen", "echocardiogram", "metformin",
+          "lisinopril", "atorvastatin", "levothyroxine",
+          "spirometry", "hyperlipidemia"
+        ],
+        "scale": 5.0
+      }
+    },
+    "corrections": {
+      "echo cardiogram": "echocardiogram",
+      "die a beat ease": "diabetes",
+      "high per tension": "hypertension",
+      "a set a minivan": "acetaminophen",
+      "lice in oh pril": "lisinopril",
+      "a tour va statin": "atorvastatin"
+    }
+  },
+  "litellm_postprocess": {
+    "prompt": "You are a medical scribe. Rewrite the transcript into structured clinical notes using SOAP format: Subjective, Objective, Assessment, Plan.",
+    "flags": { "think": false }
+  }
+}

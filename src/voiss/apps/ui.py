@@ -1,4 +1,4 @@
-"""Terminal UI rendering for dictate.
+"""Terminal UI rendering for voiss.
 
 All render functions are pure: they take a UiState snapshot and return
 Rich renderables. No side effects, no mutation.
@@ -11,7 +11,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from dictate.analysis import IntentResult
+from voiss.core.types import IntentResult
 
 
 @dataclass(slots=True)

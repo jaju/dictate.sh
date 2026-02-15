@@ -4,14 +4,49 @@ The transcribe() generator yields tokens one at a time for low-latency
 display during real-time speech processing.
 """
 
-from collections.abc import Generator
+import re
+from collections.abc import Generator, Sequence
 
 import mlx.core as mx
 import numpy as np
 
-from dictate.model._utils import get_feat_extract_output_lengths
-from dictate.model.asr import Qwen3ASRModel
-from dictate.protocols import FeatureExtractorLike, TokenizerLike
+
+def is_meaningful(text: str) -> bool:
+    """Filter out noise so we do not finalize junk output."""
+    cleaned = re.sub(r"[^\w]", "", text)
+    return len(cleaned) >= 2
+
+from voiss.core.model._utils import get_feat_extract_output_lengths
+from voiss.core.model.asr import Qwen3ASRModel
+from voiss.core.protocols import FeatureExtractorLike, TokenizerLike
+
+# Qwen3-ASR special token IDs that should never receive logit bias.
+_SPECIAL_TOKEN_IDS: frozenset[int] = frozenset(
+    {151643, 151644, 151645, 151652, 151653, 151655, 151656, 151669, 151670, 151676}
+)
+
+
+def build_logit_bias(
+    terms: Sequence[str],
+    tokenizer: TokenizerLike,
+    scale: float,
+) -> dict[int, float]:
+    """Build a token-level logit bias dict from domain vocabulary terms.
+
+    Each term is tokenized and its subword token IDs are mapped to *scale*.
+    Special tokens are excluded. The result is passed to
+    ``mlx_lm.sample_utils.make_logits_processors`` for additive logit biasing
+    during ASR decoding.
+    """
+    bias: dict[int, float] = {}
+    for term in terms:
+        token_ids = tokenizer.encode(term, return_tensors="np")
+        if hasattr(token_ids, "flatten"):
+            token_ids = token_ids.flatten().tolist()
+        for tid in token_ids:
+            if tid not in _SPECIAL_TOKEN_IDS:
+                bias[int(tid)] = scale
+    return bias
 
 
 def transcribe(
@@ -21,11 +56,19 @@ def transcribe(
     audio: np.ndarray,
     language: str = "English",
     max_tokens: int = 8192,
+    context: str | None = None,
+    logit_bias: dict[int, float] | None = None,
 ) -> Generator[str, None, None]:
     """Stream transcription tokens from audio input.
 
     Encodes audio features, replaces audio pad tokens in the prompt
     with encoder outputs, then generates text tokens autoregressively.
+
+    When *context* is provided, it is injected into the Qwen3-ASR system
+    prompt to bias the decoder toward domain-specific vocabulary.
+
+    When *logit_bias* is provided, the specified token logits are additively
+    biased during decoding via ``mlx_lm.sample_utils.make_logits_processors``.
     """
     from mlx_lm.generate import generate_step
 
@@ -51,8 +94,9 @@ def transcribe(
     supported_lower = {lang.lower(): lang for lang in supported}
     lang_name = supported_lower.get(language.lower(), language)
 
+    system_content = context or ""
     prompt = (
-        f"<|im_start|>system\n<|im_end|>\n"
+        f"<|im_start|>system\n{system_content}<|im_end|>\n"
         f"<|im_start|>user\n<|audio_start|>"
         f"{'<|audio_pad|>' * num_audio_tokens}"
         f"<|audio_end|><|im_end|>\n"
@@ -107,11 +151,18 @@ def transcribe(
 
     eos_token_ids = [151645, 151643]
 
+    logits_processors = None
+    if logit_bias:
+        from mlx_lm.sample_utils import make_logits_processors
+
+        logits_processors = make_logits_processors(logit_bias=logit_bias)
+
     for token, _ in generate_step(
         prompt=prompt_ids,
         input_embeddings=input_embeddings,
         model=model,
         max_tokens=max_tokens,
+        logits_processors=logits_processors,
     ):
         if token in eos_token_ids:
             break

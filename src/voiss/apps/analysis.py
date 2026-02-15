@@ -5,11 +5,11 @@ suggested actions using a small local LLM.
 """
 
 import re
-from dataclasses import dataclass
 from typing import Any, Final
 
-from dictate.env import suppress_output
-from dictate.protocols import TokenizerLike
+from voiss.core.env import suppress_output
+from voiss.core.protocols import TokenizerLike
+from voiss.core.types import IntentResult
 
 INTENT_EXPLAIN_PROMPT: Final = """Analyze this speech and respond with exactly 3 lines:
 INTENT: <primary intent in 2-3 words>
@@ -19,29 +19,24 @@ ACTION: <what should happen next, one short sentence>
 Speech: "{text}" /no_think"""
 
 
-@dataclass(frozen=True, slots=True)
-class IntentResult:
-    """Immutable result of intent analysis."""
-
-    intent: str = ""
-    entities: str = ""
-    action: str = ""
-
-
 def analyze_intent(
     text: str,
     llm: Any,
     llm_tokenizer: TokenizerLike,
+    prompt: str | None = None,
 ) -> IntentResult:
     """Analyze transcribed text for intent, entities, and action.
 
     Uses the provided LLM to generate a structured analysis.
+    *prompt* overrides the default ``INTENT_EXPLAIN_PROMPT`` when supplied
+    (must contain a ``{text}`` placeholder).
     Returns a frozen IntentResult with parsed fields.
     """
     from mlx_lm.generate import generate
 
+    template = prompt or INTENT_EXPLAIN_PROMPT
     messages = [
-        {"role": "user", "content": INTENT_EXPLAIN_PROMPT.format(text=text)}
+        {"role": "user", "content": template.format(text=text)}
     ]
     prompt = llm_tokenizer.apply_chat_template(
         messages, tokenize=False, add_generation_prompt=True

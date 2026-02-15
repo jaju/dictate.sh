@@ -1,15 +1,15 @@
 # /// script
 # requires-python = ">=3.12"
 # dependencies = [
-#     "dictate-stt",
+#     "voissistant",
 # ]
 #
 # [tool.uv.sources]
-# dictate-stt = { path = "." }
+# voissistant = { path = "." }
 # ///
 """Standalone, low-latency transcription for Apple Silicon."""
 
-from dictate.cli import main
+from voiss.apps.cli import main
 
 if __name__ == "__main__":
     raise SystemExit(main())
